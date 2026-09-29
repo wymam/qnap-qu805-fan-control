@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.bak
+*.bak-*
+*.tmp
+.nas_cred.json
+cred.json
+*.log
+.DS_Store
+Thumbs.db
