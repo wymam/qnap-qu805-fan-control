@@ -649,326 +649,372 @@ HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#12141a;color:#e6e8ee;font-family:-apple-system,"PingFang SC",system-ui,sans-serif;padding:24px}
-h1{font-size:20px;margin:0 0 4px}
-.sub{color:#8b93a7;font-size:13px;margin-bottom:20px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:22px}
-.card{background:#1b1f28;border:1px solid #2a3040;border-radius:10px;padding:16px}
-.card .k{font-size:12px;color:#8b93a7;margin-bottom:6px}
-.card .v{font-size:26px;font-weight:600}
-.card .v small{font-size:13px;color:#8b93a7;font-weight:400}
+body{margin:0;background:#12141a;color:#e6e8ee;font:13px/1.5 -apple-system,"PingFang SC",system-ui,sans-serif;padding:12px 14px}
+.wrap{display:grid;gap:10px;max-width:2200px;margin:0 auto}
+.top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-size:17px;margin:0;font-weight:600}
+.top .sub{color:#6b7488;font-size:12px}
+.tags{display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap}
+.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.metric{background:#1b1f28;border:1px solid #2a3040;border-radius:8px;padding:7px 10px;min-width:0}
+.metric .k{font-size:11px;color:#8b93a7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.metric .v{font-size:19px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.metric .v small{font-size:11px;color:#8b93a7;font-weight:400}
 .hot{color:#ff6b6b}.warm{color:#ffa94d}.cool{color:#51cf66}
-.panel{background:#1b1f28;border:1px solid #2a3040;border-radius:10px;padding:18px;margin-bottom:18px}
-.panel h2{font-size:15px;margin:0 0 14px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #262c3a}
-th{color:#8b93a7;font-weight:500;font-size:12px}
-input,select{background:#12141a;color:#e6e8ee;border:1px solid #2f3648;border-radius:6px;padding:7px 9px;width:100%}
-button{background:#3b7cff;color:#fff;border:0;border-radius:6px;padding:9px 16px;cursor:pointer;font-size:14px}
+/* 两栏：左＝历史/手动/日志，右＝档位规则/硬盘保护 */
+.cols{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(430px,1fr);gap:10px;align-items:start}
+.panel{background:#1b1f28;border:1px solid #2a3040;border-radius:10px;min-width:0}
+.sub{padding:11px 13px;min-width:0}
+.sub+.sub{border-top:1px solid #262c3a}
+.mhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.mhead h2{font-size:13px;margin:0;font-weight:600;color:#cfd6e6}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:2px 6px;border-bottom:1px solid #262c3a}
+th{color:#8b93a7;font-weight:500;font-size:11px}
+td input{padding:3px 6px}
+.steps-box{max-height:220px;overflow:auto}
+input,select{background:#12141a;color:#e6e8ee;border:1px solid #2f3648;border-radius:6px;padding:5px 7px;width:100%;font-size:12px}
+button{background:#3b7cff;color:#fff;border:0;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px}
 button.gray{background:#2f3648}
+button.mini{padding:4px 9px;font-size:11px}
+button:active{opacity:.82}
 .btn-dirty{background:#8a5a12;color:#ffd8a8;box-shadow:inset 0 0 0 1px #b8862b}
-button:active{opacity:.8}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
-input[type=range]{width:260px;padding:0}
-input[type=checkbox]{width:auto}
-.tag{display:inline-block;padding:3px 9px;border-radius:5px;font-size:12px;background:#2f3648;color:#b6c0d6}
+.rbtn.on{background:#3b7cff;box-shadow:inset 0 0 0 1px #7aa6ff}
+.line{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:7px}
+.line:last-child{margin-bottom:0}
+.lb{font-size:11px;color:#8b93a7;white-space:nowrap}
+.spacer{margin-left:auto}
+.tag{display:inline-block;padding:2px 7px;border-radius:5px;font-size:11px;background:#2f3648;color:#b6c0d6;white-space:nowrap}
 .tag.on{background:#1f6f3f;color:#8ce0a8}
 .tag.hold{background:#7a4a12;color:#ffc078}
 .tag.off{background:#3a2020;color:#e08a8a}
-.log{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#8b93a7;max-height:150px;overflow:auto;white-space:pre-line}
-.hint{font-size:12px;color:#6b7488;margin-top:8px;line-height:1.6}
-.warn{color:#ffa94d}
+.chartbox{position:relative;height:min(292px,34vh);min-height:170px;background:#10131a;border-radius:8px;overflow:hidden}
+.chartbox svg{width:100%;height:100%;display:block}
+.tip{position:absolute;display:none;pointer-events:none;background:#0e1117;border:1px solid #2f3648;border-radius:6px;padding:6px 9px;font-size:11px;line-height:1.6;color:#cfd6e6;white-space:nowrap;z-index:5;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.legend{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:12px;color:#b6c0d6;margin-top:7px}
+.legend label{display:flex;gap:5px;align-items:center;cursor:pointer;user-select:none}
+.legend i{width:12px;height:3px;border-radius:2px;display:inline-block}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:7px}
+.stat{background:#151922;border:1px solid #262c3a;border-radius:7px;padding:4px 8px;font-size:11px;color:#8b93a7;min-width:0}
+.stat b{display:block;font-size:13px;color:#e6e8ee;font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#8b93a7;max-height:min(108px,14vh);overflow:auto;white-space:pre-wrap;word-break:break-all}
+.hint{font-size:11px;color:#6b7488;line-height:1.5;margin-top:6px}
 .mono{font-family:ui-monospace,Menlo,monospace}
-button.mini{padding:5px 12px;font-size:13px}
-.rbtn.on{background:#3b7cff;box-shadow:inset 0 0 0 1px #7aa6ff}
-.chartbox{position:relative;margin-top:6px}
-.chartbox svg{width:100%;height:auto;display:block;border-radius:8px;background:#10131a}
-.tip{position:absolute;display:none;pointer-events:none;background:#0e1117;border:1px solid #2f3648;border-radius:6px;padding:7px 10px;font-size:12px;line-height:1.65;color:#cfd6e6;white-space:nowrap;z-index:5;box-shadow:0 6px 18px rgba(0,0,0,.45)}
-.legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;color:#b6c0d6}
-.legend label{display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none}
-.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
-.stat{background:#151922;border:1px solid #262c3a;border-radius:8px;padding:8px 12px;font-size:12px;color:#8b93a7}
-.stat b{display:block;font-size:15px;color:#e6e8ee;font-weight:600;margin-top:2px}
+.warn{color:#ffa94d}
+input[type=range]{width:100%;padding:0}
+input[type=checkbox]{width:auto}
+@media (max-width:1180px){
+  .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .cols{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 </style></head><body>
-<h1>QU805 风扇温控</h1>
-<div class="sub">qnap8528 EC 驱动 · ITE8528E · 自动调速中<span id="dirtyTag" class="tag hold" style="display:none;margin-left:8px">有未保存的修改 · 自动刷新已暂停覆盖</span></div>
+<div class="wrap">
 
-<div class="grid">
-  <div class="card"><div class="k">CPU 温度</div><div class="v" id="temp">--</div></div>
-  <div class="card"><div class="k">机械盘最高温</div><div class="v" id="hddmax">--</div></div>
-  <div class="card"><div class="k">风扇转速</div><div class="v" id="pct">--</div></div>
-  <div class="card"><div class="k">PWM 原始值</div><div class="v" id="pwm">--</div></div>
-  <div class="card"><div class="k">实测 RPM</div><div class="v" id="rpm">--</div></div>
-  <div class="card"><div class="k">模式 / 状态</div><div class="v" id="mode" style="font-size:15px">--</div></div>
-</div>
-
-<div class="panel">
-  <h2>温度 / 转速历史</h2>
-  <div class="row">
-    <button class="gray mini rbtn" data-r="1h" onclick="setRange('1h')">1 小时</button>
-    <button class="gray mini rbtn" data-r="6h" onclick="setRange('6h')">6 小时</button>
-    <button class="gray mini rbtn" data-r="24h" onclick="setRange('24h')">24 小时</button>
-    <button class="gray mini rbtn" data-r="7d" onclick="setRange('7d')">7 天</button>
-    <span id="histmeta" class="tag">--</span>
-    <span style="font-size:13px;color:#8b93a7;margin-left:auto">保留天数</span>
-    <input id="hist_retention_days" type="number" step="1" min="1" max="365" style="width:80px">
-    <button id="saveHistBtn" onclick="saveHistCfg()">保存</button>
-  </div>
-  <div class="row legend" id="legend"></div>
-  <div class="chartbox" id="chartbox">
-    <svg id="chart" viewBox="0 0 1000 320" preserveAspectRatio="xMidYMid meet"></svg>
-    <div id="tip" class="tip"></div>
-  </div>
-  <div class="row" id="histstats"></div>
-  <div class="hint">
-    采样间隔与控制周期一致（默认 <span class="mono">5</span> 秒），明文追加到
-    <span class="mono">/data/history.tsv</span>（宿主机
-    <span class="mono">/vol1/docker/fnos-fan-webui/data/history.tsv</span>），容器重启不丢；
-    超过「保留天数」的采样会被自动删除。<br>
-    曲线按所选跨度自动聚合成约 360 个点（桶内取平均，区间最低/平均/最高在下方单独统计），
-    所以切到 7 天也不会变卡。鼠标移到图上可看该时刻的精确数值。<br>
-    左侧温度轴对应 CPU 与机械盘最高温；转速轴对应指令转速百分比；勾选「实测 RPM」后会在最右侧
-    再出现一条独立的 RPM 轴（单位不同，不共用刻度，避免两条不同量纲的线互相误导）。
+<div class="top">
+  <h1>QU805 风扇温控</h1>
+  <span class="sub">qnap8528 EC · ITE8528E</span>
+  <div class="tags">
+    <span id="dirtyTag" class="tag hold" style="display:none">有未保存的修改 · 自动刷新已暂停覆盖</span>
+    <span id="mode"></span>
   </div>
 </div>
 
-<div class="panel">
-  <h2>温度档位规则</h2>
-  <table><thead><tr><th>温度不高于 (°C)</th><th>风扇转速 (%)</th><th></th></tr></thead>
-  <tbody id="steps"></tbody></table>
-  <div class="row"><button class="gray" onclick="addStep()">+ 增加档位</button></div>
-  <div class="row">
-    <span style="font-size:13px;color:#8b93a7">高温触发 (°C)</span>
-    <input id="hold_trigger" type="number" step="0.1" style="width:100px">
-    <span style="font-size:13px;color:#8b93a7">保持时长 (秒)</span>
-    <input id="hold_seconds" type="number" step="1" style="width:100px">
-    <span style="font-size:13px;color:#8b93a7">安全下限 (%)</span>
-    <input id="min_pct" type="number" step="1" style="width:90px">
-  </div>
-  <div class="row">
-    <span style="font-size:13px;color:#8b93a7">温度源</span>
-    <select id="temp_source" style="width:180px">
-      <option value="coretemp">CPU (coretemp)</option>
-      <option value="qnap8528">EC 传感器 (qnap8528)</option>
-      <option value="max">两者取最高</option>
-    </select>
-    <button id="saveCurveBtn" onclick="saveCurve()">保存规则</button>
-  </div>
-  <div class="hint">超过「高温触发」温度后，即使温度降到很低，也会保持触发时的档位转速运行指定时长，避免转速频繁抖动。</div>
+<div class="metrics">
+  <div class="metric"><div class="k">CPU 温度</div><div class="v" id="temp">--</div></div>
+  <div class="metric"><div class="k">机械盘最高温</div><div class="v" id="hddmax">--</div></div>
+  <div class="metric"><div class="k">风扇转速</div><div class="v" id="pct">--</div></div>
+  <div class="metric"><div class="k">PWM 原始值</div><div class="v" id="pwm">--</div></div>
+  <div class="metric"><div class="k">实测 RPM</div><div class="v" id="rpm">--</div></div>
+  <div class="metric"><div class="k">生效温度源</div><div class="v" id="src" style="font-size:15px">--</div></div>
 </div>
 
-<div class="panel">
-  <h2>机械硬盘高温保护</h2>
-  <div class="row">
-    <label style="font-size:13px;color:#8b93a7"><input type="checkbox" id="hdd_enabled"> 启用</label>
-    <span style="font-size:13px;color:#8b93a7">触发温度 (°C)</span>
-    <input id="hdd_trigger_temp" type="number" step="0.1" style="width:90px">
-    <span style="font-size:13px;color:#8b93a7">触发转速 (%)</span>
-    <input id="hdd_pct" type="number" step="1" style="width:90px">
-    <span style="font-size:13px;color:#8b93a7">持续时长 (秒)</span>
-    <input id="hdd_hold_seconds" type="number" step="1" style="width:100px">
-    <span style="font-size:13px;color:#8b93a7">监视范围</span>
-    <select id="hdd_watch" style="width:190px">
-      <option value="rotational">仅机械硬盘</option>
-      <option value="all">全部 SATA 盘</option>
-      <option value="list">自定义列表</option>
-    </select>
-    <button id="saveHddBtn" onclick="saveHdd()">保存保护规则</button>
-  </div>
-  <div class="row" id="hddlist_row" style="display:none">
-    <span style="font-size:13px;color:#8b93a7">监视设备（逗号分隔）</span>
-    <input id="hdd_sensors" type="text" style="width:280px" placeholder="sdb,sdc,sdd,sde">
-  </div>
-  <div class="row"><span id="hddstate" class="tag">--</span></div>
-  <table style="margin-top:12px"><thead><tr>
-    <th>设备</th><th>型号</th><th>类型</th><th>温度</th><th>参与监视</th>
-  </tr></thead><tbody id="hddtable"></tbody></table>
-  <div class="hint">
-    任一被监视磁盘达到「触发温度」时，风扇转速不低于「触发转速」并持续「持续时长」秒；
-    期间即使硬盘降温也会维持，避免转速抖动。    该保护在自动/手动模式下<b>都生效</b>
-    （作为转速下限，常规曲线若要求更高则以更高者为准）。<br>
-    磁盘温度来自内核 <span class="mono">drivetemp</span> 模块；若表格为空，
-    请在宿主机执行 <span class="mono">modprobe drivetemp</span>（已配置开机自动加载）。
-  </div>
-</div>
+<div class="cols">
 
-<div class="panel">
-  <h2>手动模式</h2>
-  <div class="row">
-    <input type="range" id="slider" min="0" max="100" step="1" value="80" oninput="document.getElementById('sv').textContent=this.value+'%'">
-    <span id="sv" style="width:50px">80%</span>
-    <button onclick="setPending()">暂存</button>
-    <button class="gray" onclick="applyPending()">✅ 确认应用</button>
-    <button class="gray" onclick="setMode('auto')">切回自动</button>
-  </div>
-  <div class="hint">手动值需点「确认应用」才会真正写入硬件，防止误操作。</div>
-</div>
+  <!-- ============ 左：历史曲线 + 手动模式 + 运行日志 ============ -->
+  <section class="panel">
+    <div class="sub">
+      <div class="mhead">
+        <h2>温度 / 转速历史</h2>
+        <button class="gray mini rbtn" data-r="1h" onclick="setRange('1h')">1 小时</button>
+        <button class="gray mini rbtn" data-r="6h" onclick="setRange('6h')">6 小时</button>
+        <button class="gray mini rbtn" data-r="24h" onclick="setRange('24h')">24 小时</button>
+        <button class="gray mini rbtn" data-r="7d" onclick="setRange('7d')">7 天</button>
+        <span id="histmeta" class="tag spacer">--</span>
+      </div>
+      <div class="chartbox" id="chartbox">
+        <svg id="chart"></svg>
+        <div id="tip" class="tip"></div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="stats" id="histstats"></div>
+    </div>
 
-<div class="panel">
-  <h2>运行日志</h2>
-  <div class="row">
-    <span style="font-size:13px;color:#8b93a7">保留天数</span>
-    <input id="log_retention_days" type="number" step="1" min="1" max="365" style="width:80px">
-    <button id="saveLogBtn" onclick="saveLogCfg()">保存</button>
-    <a href="/api/log?lines=0" target="_blank" style="font-size:13px;color:#3b7cff;text-decoration:none">查看 / 下载完整日志</a>
-    <span id="logmeta" class="tag">--</span>
-  </div>
-  <div class="log" id="log" style="max-height:340px"></div>
-  <div class="hint">
-    日志按 <span class="mono">YYYY-MM-DD HH:MM:SS</span> 明文追加到
-    <span class="mono">/data/fan.log</span>（宿主机
-    <span class="mono">/vol1/docker/fnos-fan-webui/data/fan.log</span>），容器重启不丢；
-    超过「保留天数」的记录会被自动删除。页面显示最近 200 行。
-  </div>
-</div>
+    <div class="sub">
+      <div class="mhead">
+        <h2>手动模式</h2>
+        <button class="gray mini" onclick="setPending()">暂存</button>
+        <button class="mini" onclick="applyPending()">确认应用</button>
+        <button class="gray mini" onclick="setMode('auto')">切回自动</button>
+        <span class="lb spacer">需「确认应用」才写入硬件</span>
+      </div>
+      <div class="line" style="margin-bottom:0">
+        <input type="range" id="slider" min="0" max="100" step="1" value="80" oninput="document.getElementById('sv').textContent=this.value+'%'">
+        <span id="sv" class="tag" style="min-width:46px;text-align:center">80%</span>
+      </div>
+    </div>
 
+    <div class="sub">
+      <div class="mhead">
+        <h2>运行日志</h2>
+        <span class="lb">保留天数（日志 + 历史）</span>
+        <input id="retention_days" type="number" step="1" min="1" max="365" style="width:58px" title="日志与历史采样共用同一个保留天数">
+        <button id="saveLogBtn" class="mini" onclick="saveLogCfg()">保存</button>
+        <a href="/api/log?lines=0" target="_blank" style="font-size:11px;color:#3b7cff;text-decoration:none">完整日志</a>
+        <span id="logmeta" class="tag spacer">--</span>
+        <button class="gray mini" id="logToggleBtn" onclick="toggleLog()">收起</button>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+
+  <!-- ============ 右：温度档位规则 + 机械硬盘高温保护 ============ -->
+  <section class="panel">
+    <div class="sub">
+      <div class="mhead">
+        <h2>温度档位规则</h2>
+        <button id="saveCurveBtn" class="mini spacer" onclick="saveCurve()">保存规则</button>
+        <button class="gray mini" onclick="addStep()">+ 档位</button>
+      </div>
+      <div class="steps-box">
+        <table><thead><tr><th>温度不高于 (°C)</th><th>风扇转速 (%)</th><th style="width:44px"></th></tr></thead>
+        <tbody id="steps"></tbody></table>
+      </div>
+      <div class="line" style="margin-top:8px">
+        <span class="lb">高温触发</span><input id="hold_trigger" type="number" step="0.1" style="width:62px">
+        <span class="lb">保持(秒)</span><input id="hold_seconds" type="number" step="1" style="width:64px">
+        <span class="lb">安全下限</span><input id="min_pct" type="number" step="1" style="width:56px">
+      </div>
+      <div class="line">
+        <span class="lb">温度源</span>
+        <select id="temp_source" style="width:148px">
+          <option value="coretemp">CPU (coretemp)</option>
+          <option value="qnap8528">EC 传感器 (qnap8528)</option>
+          <option value="max">两者取最高</option>
+        </select>
+      </div>
+      <div class="hint">超过「高温触发」后即使温度回落，也保持触发时的档位运行「保持」秒；填 0 关闭该功能。</div>
+    </div>
+
+    <div class="sub">
+      <div class="mhead"><h2>机械硬盘高温保护</h2></div>
+      <div class="line">
+        <label class="lb" style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="hdd_enabled"> 启用</label>
+        <span class="lb" title="任一被监视磁盘达到此温度即触发">温度</span><input id="hdd_trigger_temp" type="number" step="0.1" style="width:58px">
+        <span class="lb" title="触发后风扇转速的下限">转速</span><input id="hdd_pct" type="number" step="1" style="width:54px">
+        <span class="lb" title="触发后维持的秒数">持续</span><input id="hdd_hold_seconds" type="number" step="1" style="width:60px">
+        <span class="lb" title="哪些磁盘参与监视">范围</span>
+        <select id="hdd_watch" style="width:128px">
+          <option value="rotational">仅机械硬盘</option>
+          <option value="all">全部 SATA 盘</option>
+          <option value="list">自定义列表</option>
+        </select>
+      </div>
+      <div class="line">
+        <span id="hddlist_row" style="display:none;align-items:center;gap:6px">
+          <span class="lb">设备</span><input id="hdd_sensors" type="text" style="width:160px" placeholder="sdb,sdc,sdd,sde">
+        </span>
+        <button id="saveHddBtn" onclick="saveHdd()">保存</button>
+        <span id="hddstate" class="tag spacer">--</span>
+      </div>
+      <table><thead><tr>
+        <th style="width:64px">设备</th><th>型号</th><th style="width:66px">类型</th><th style="width:76px">温度</th><th style="width:84px">参与监视</th>
+      </tr></thead><tbody id="hddtable"></tbody></table>
+    </div>
+  </section>
+
+</div>
+</div>
 <script>
 async function api(u,o){const r=await fetch(u,o);return r.json()}
 function cls(t){return t>=85?'hot':(t>=70?'warm':'cool')}
 function hcls(t){return t>=44?'hot':(t>=40?'warm':'cool')}
+const NL=`
+`;
 let cur=null;
+
 async function refresh(){
   const s=await api('/api/status');cur=s;
-  document.getElementById('temp').innerHTML=s.temp==null?'--':`<span class="${cls(s.temp)}">${s.temp} <small>°C</small></span>`;
-  document.getElementById('hddmax').innerHTML=s.hdd_max==null?'--':`<span class="${hcls(s.hdd_max)}">${s.hdd_max} <small>°C</small></span>`;
-  document.getElementById('pct').innerHTML=s.pct==null?'--':`${s.pct} <small>%</small>`;
-  document.getElementById('pwm').textContent=s.pwm==null?'--':s.pwm+' / 255';
-  document.getElementById('rpm').innerHTML=(s.rpm||[]).map(r=>`<div>${r.rpm} <small>RPM (fan${r.fan})</small></div>`).join('')||'--';
-  let m=`<span class="tag ${s.mode==='auto'?'on':''}">${s.mode==='auto'?'自动':'手动'}</span> `;
+  const g=id=>document.getElementById(id);
+  g('temp').innerHTML=s.temp==null?'--':`<span class="${cls(s.temp)}">${s.temp} <small>°C</small></span>`;
+  g('hddmax').innerHTML=s.hdd_max==null?'--':`<span class="${hcls(s.hdd_max)}">${s.hdd_max} <small>°C</small></span>`;
+  g('pct').innerHTML=s.pct==null?'--':`${s.pct} <small>%</small>`;
+  g('pwm').textContent=s.pwm==null?'--':s.pwm+' / 255';
+  g('rpm').innerHTML=(s.rpm||[]).map(r=>`${r.rpm}<small> RPM</small>`).join(' / ')||'--';
+  const SRC={coretemp:'CPU (coretemp)',qnap8528:'EC 传感器',max:'两者取最高'};
+  g('src').textContent=SRC[s.temp_source]||s.temp_source||'--';
+  let m=`<span class="tag ${s.mode==='auto'?'on':''}">${s.mode==='auto'?'自动':'手动'}</span>`;
   const left=Math.max(0,Math.round(s.hold_remaining||0));
-  if(left>0) m+=`<span class="tag hold">保持中 ${left}s</span> `;
+  if(left>0)m+=` <span class="tag hold">保持中 ${left}s</span>`;
   const hl=Math.max(0,Math.round(s.hdd_hold_remaining||0));
-  if(hl>0) m+=`<span class="tag hold">硬盘保护 ${hl}s</span>`;
-  document.getElementById('mode').innerHTML=m;
-  const hs=document.getElementById('hddstate');
+  if(hl>0)m+=` <span class="tag hold">硬盘保护 ${hl}s</span>`;
+  g('mode').innerHTML=m;
+
+  const hs=g('hddstate');
   if(!s.hdd_enabled){hs.className='tag off';hs.textContent='硬盘保护已关闭';}
   else if(hl>0){hs.className='tag hold';hs.textContent=`保护生效中 · 剩余 ${hl}s（转速下限 ${s.hdd_pct}%）`;}
-  else if(s.hdd_max==null){hs.className='tag off';hs.textContent='未检测到磁盘温度传感器（宿主机需 modprobe drivetemp）';}
+  else if(s.hdd_max==null){hs.className='tag off';hs.textContent='无磁盘温度传感器（宿主机需 modprobe drivetemp）';}
   else {hs.className='tag on';hs.textContent=`待命 · 机械盘最高 ${s.hdd_max}°C / 阈值 ${s.hdd_trigger_temp}°C`;}
-  const tb=document.getElementById('hddtable');
-  tb.innerHTML=(s.hdd_disks||[]).map(d=>{
+
+  g('hddtable').innerHTML=(s.hdd_disks||[]).map(d=>{
     const ty=d.rotational===1?'机械盘':(d.rotational===0?'SSD':'未知');
     return `<tr><td class="mono">${d.dev}</td><td>${d.model||'--'}</td><td>${ty}</td>
       <td><span class="${hcls(d.temp)}">${d.temp} °C</span></td>
       <td>${d.watched?'<span class="tag on">是</span>':'<span class="tag">否</span>'}</td></tr>`;
   }).join('')||'<tr><td colspan="5" class="warn">没有 drivetemp 传感器</td></tr>';
-  document.getElementById('log').textContent=(s.log||[]).join('\\n');
-  if(!stepsDirty){
-    const rows=s.steps.map(stepRow).join('');
-    const tb=document.getElementById('steps');
-    if(tb.dataset.sig!==rows){tb.innerHTML=rows;tb.dataset.sig=rows;}
-  }
+
+  g('logmeta').textContent=`日志 ${((s.log_bytes||0)/1024).toFixed(1)} KB · ${(s.log||[]).length} 行 · 历史 ${((s.hist_bytes||0)/1024).toFixed(1)} KB`;
+  if(logOpen)g('log').textContent=(s.log||[]).join(NL);
+
+  if(!stepsDirty)renderSteps(s.steps);
   setVal('hold_trigger',s.hold_trigger);
   setVal('hold_seconds',s.hold_seconds);
   setVal('min_pct',s.min_pct);
   setVal('temp_source',s.temp_source);
   setVal('slider',s.manual_pct);
-  if(!dirty.has('slider'))document.getElementById('sv').textContent=s.manual_pct+'%';
+  if(!dirty.has('slider'))g('sv').textContent=s.manual_pct+'%';
   setVal('hdd_enabled',s.hdd_enabled);
   setVal('hdd_trigger_temp',s.hdd_trigger_temp);
   setVal('hdd_pct',s.hdd_pct);
   setVal('hdd_hold_seconds',s.hdd_hold_seconds);
   setVal('hdd_watch',s.hdd_watch);
   setVal('hdd_sensors',(s.hdd_sensors||[]).join(','));
-  if(!dirty.has('hdd_watch'))document.getElementById('hddlist_row').style.display=(s.hdd_watch==='list')?'flex':'none';
-  setVal('log_retention_days',s.log_retention_days);
-  setVal('hist_retention_days',s.hist_retention_days);
-  const lm=document.getElementById('logmeta');
-  if(lm)lm.textContent='保留 '+s.log_retention_days+' 天 · 文件 '+(((s.log_bytes||0)/1024).toFixed(1))+' KB · 显示最近 '+((s.log||[]).length)+' 行';
+  if(!dirty.has('hdd_watch'))g('hddlist_row').style.display=(s.hdd_watch==='list')?'flex':'none';
+  setVal('retention_days',s.retention_days);
 }
 
 // ===== 未保存修改保护 =====
-// 只要某个控件被改过就记入 dirty，自动刷新永不再覆盖它（原版只在「+增加档位」时
-// 才置 window.edt，导致手填数值 3 秒后被服务端值冲掉）。
-let stepSeq=0, dirty=new Set(), stepsDirty=false;
+// 改过的控件记入 dirty，自动刷新永不再覆盖它。
+let stepSeq=0, dirty=new Set(), stepsDirty=false, stepIds=new Set();
 const CURVE_IDS=['hold_trigger','hold_seconds','min_pct','temp_source'];
 const HDD_IDS=['hdd_enabled','hdd_trigger_temp','hdd_pct','hdd_hold_seconds','hdd_watch','hdd_sensors'];
-const LOG_IDS=['log_retention_days'];
-const HIST_IDS=['hist_retention_days'];
-function isStepId(id){return /^[bp]\\d+$/.test(id)}
-function anyDirty(ids){return ids.some(function(i){return dirty.has(i)})}
+const RET_IDS=['retention_days'];
+function anyDirty(ids){return ids.some(i=>dirty.has(i))}
+function isStepEl(el){return !!(el&&el.classList&&el.classList.contains('step-input'))}
 function setVal(id,v){
   const el=document.getElementById(id);
   if(!el||dirty.has(id)||document.activeElement===el)return;
   if(el.type==='checkbox')el.checked=!!v;else el.value=(v==null?'':v);
 }
 function clearDirty(pred){
-  Array.from(dirty).forEach(function(id){if(pred(id))dirty.delete(id)});
+  Array.from(dirty).forEach(id=>{if(pred(id))dirty.delete(id)});
   paintDirty();
 }
 function paintDirty(){
   const tag=document.getElementById('dirtyTag');
   if(tag)tag.style.display=dirty.size?'inline-block':'none';
-  const b1=document.getElementById('saveCurveBtn'),b2=document.getElementById('saveHddBtn'),b3=document.getElementById('saveLogBtn'),b4=document.getElementById('saveHistBtn');
-  if(b1)b1.className=(anyDirty(CURVE_IDS)||stepsDirty)?'btn-dirty':'';
-  if(b2)b2.className=anyDirty(HDD_IDS)?'btn-dirty':'';
-  if(b3)b3.className=anyDirty(LOG_IDS)?'btn-dirty':'';
-  if(b4)b4.className=anyDirty(HIST_IDS)?'btn-dirty':'';
+  const b=[['saveCurveBtn',anyDirty(CURVE_IDS)||stepsDirty],
+           ['saveHddBtn',anyDirty(HDD_IDS)],
+           ['saveLogBtn',anyDirty(RET_IDS)]];
+  b.forEach(p=>{
+    const el=document.getElementById(p[0]);
+    if(el)el.className=p[1]?'btn-dirty':(p[0]==='saveLogBtn'?'mini':'');
+  });
 }
-document.addEventListener('input',function(e){
-  const t=e.target;if(!t||!t.id)return;
-  dirty.add(t.id);if(isStepId(t.id))stepsDirty=true;paintDirty();
+document.addEventListener('input',e=>{
+  const t=e.target;if(!t)return;
+  if(t.id)dirty.add(t.id);
+  if(isStepEl(t))stepsDirty=true;
+  paintDirty();
 });
-document.addEventListener('change',function(e){
+document.addEventListener('change',e=>{
   const t=e.target;if(!t||!t.id)return;
   dirty.add(t.id);paintDirty();
 });
 function stepRow(x){
   const k=++stepSeq;
-  return `<tr><td><input type="number" step="0.1" value="${x.below}" id="b${k}"></td>
-     <td><input type="number" step="1" value="${x.pct}" id="p${k}"></td>
-     <td><button class="gray" onclick="delStep(${k})">删除</button></td></tr>`;
+  return `<tr><td><input class="step-input" type="number" step="0.1" value="${x.below}" id="b${k}"></td>`+
+    `<td><input class="step-input" type="number" step="1" value="${x.pct}" id="p${k}"></td>`+
+    `<td><button class="gray mini" onclick="delStep(${k})">删</button></td></tr>`;
+}
+function renderSteps(steps){
+  const rows=(steps||[]).map(stepRow).join('');
+  const tb=document.getElementById('steps');
+  if(tb.dataset.sig===rows)return;
+  tb.innerHTML=rows;
+  tb.dataset.sig=rows;
+  stepIds=new Set(Array.from(tb.querySelectorAll('input.step-input')).map(e=>e.id));
 }
 function addStep(){
   if(!cur)return;
-  document.getElementById('steps').insertAdjacentHTML('beforeend',stepRow({below:999,pct:100}));
+  const tb=document.getElementById('steps');
+  tb.insertAdjacentHTML('beforeend',stepRow({below:999,pct:100}));
+  tb.dataset.sig='';
+  stepIds=new Set(Array.from(tb.querySelectorAll('input.step-input')).map(e=>e.id));
   stepsDirty=true;paintDirty();
 }
 function delStep(k){
   const r=document.getElementById('b'+k);
-  if(r){r.closest('tr').remove();stepsDirty=true;paintDirty();}
+  if(!r)return;
+  const tb=document.getElementById('steps');
+  r.closest('tr').remove();
+  tb.dataset.sig='';
+  stepIds=new Set(Array.from(tb.querySelectorAll('input.step-input')).map(e=>e.id));
+  stepsDirty=true;paintDirty();
+}
+function readSteps(){
+  const out=[];
+  document.getElementById('steps').querySelectorAll('tr').forEach(tr=>{
+    const a=tr.querySelectorAll('input');
+    if(a.length>=2)out.push({below:parseFloat(a[0].value),pct:parseFloat(a[1].value)});
+  });
+  out.sort((x,y)=>x.below-y.below);
+  return out;
 }
 async function saveCurve(){
-  const tbody=document.getElementById('steps');
-  const steps=[];
-  tbody.querySelectorAll('tr').forEach(function(tr){
-    const a=tr.querySelector('input[type=number]');
-    const b=tr.querySelectorAll('input[type=number]')[1];
-    if(a&&b)steps.push({below:parseFloat(a.value),pct:parseFloat(b.value)});
-  });
-  steps.sort(function(x,y){return x.below-y.below});
+  const g=id=>document.getElementById(id);
   await api('/api/curve',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({steps,hold_trigger:parseFloat(document.getElementById('hold_trigger').value),
-      hold_seconds:parseFloat(document.getElementById('hold_seconds').value),
-      min_pct:parseFloat(document.getElementById('min_pct').value),
-      temp_source:document.getElementById('temp_source').value})});
+    body:JSON.stringify({steps:readSteps(),
+      hold_trigger:parseFloat(g('hold_trigger').value),
+      hold_seconds:parseFloat(g('hold_seconds').value),
+      min_pct:parseFloat(g('min_pct').value),
+      temp_source:g('temp_source').value})});
   stepsDirty=false;
-  clearDirty(function(id){return CURVE_IDS.indexOf(id)>=0||isStepId(id)});
+  clearDirty(id=>CURVE_IDS.indexOf(id)>=0||stepIds.has(id));
   alert('规则已保存');refresh();
 }
 document.getElementById('hdd_watch').addEventListener('change',function(){
   document.getElementById('hddlist_row').style.display=(this.value==='list')?'flex':'none';
 });
 async function saveHdd(){
-  const body={
-    hdd_enabled:document.getElementById('hdd_enabled').checked,
-    hdd_trigger_temp:parseFloat(document.getElementById('hdd_trigger_temp').value),
-    hdd_pct:parseFloat(document.getElementById('hdd_pct').value),
-    hdd_hold_seconds:parseFloat(document.getElementById('hdd_hold_seconds').value),
-    hdd_watch:document.getElementById('hdd_watch').value,
-    hdd_sensors:document.getElementById('hdd_sensors').value.split(',').map(function(x){return x.trim()}).filter(function(x){return x})
-  };
-  const r=await api('/api/hdd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  clearDirty(function(id){return HDD_IDS.indexOf(id)>=0});
+  const g=id=>document.getElementById(id);
+  const r=await api('/api/hdd',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      hdd_enabled:g('hdd_enabled').checked,
+      hdd_trigger_temp:parseFloat(g('hdd_trigger_temp').value),
+      hdd_pct:parseFloat(g('hdd_pct').value),
+      hdd_hold_seconds:parseFloat(g('hdd_hold_seconds').value),
+      hdd_watch:g('hdd_watch').value,
+      hdd_sensors:g('hdd_sensors').value.split(',').map(x=>x.trim()).filter(x=>x)
+    })});
+  clearDirty(id=>HDD_IDS.indexOf(id)>=0);
   alert(r.ok?'硬盘保护规则已保存':'保存失败');refresh();
 }
+// 界面上只留一个「保留天数」，保存时把日志与历史采样一起设成同一个值
 async function saveLogCfg(){
-  const v=parseFloat(document.getElementById('log_retention_days').value);
+  const v=parseFloat(document.getElementById('retention_days').value);
   const r=await api('/api/logcfg',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({log_retention_days:v})});
-  clearDirty(function(id){return LOG_IDS.indexOf(id)>=0});
-  alert(r.ok?('已保存（保留 '+r.retention_days+' 天），本次清理 '+r.dropped+' 条超期日志'):'保存失败');
-  refresh();
+    body:JSON.stringify({log_retention_days:v,hist_retention_days:v})});
+  clearDirty(id=>RET_IDS.indexOf(id)>=0);
+  alert(r.ok?('已保存：日志与历史采样各保留 '+r.retention_days+' 天；本次清理日志 '+r.dropped+' 条、采样 '+r.hist_dropped+' 条'):'保存失败');
+  refresh();loadHistory();
+}
+let logOpen=true;
+function toggleLog(){
+  logOpen=!logOpen;
+  document.getElementById('log').style.display=logOpen?'block':'none';
+  document.getElementById('logToggleBtn').textContent=logOpen?'收起':'展开';
+  if(logOpen&&cur)document.getElementById('log').textContent=(cur.log||[]).join(NL);
 }
 async function setPending(){
   const v=parseInt(document.getElementById('slider').value);
@@ -977,16 +1023,17 @@ async function setPending(){
 }
 async function applyPending(){
   await api('/api/apply',{method:'POST'});
-  clearDirty(function(id){return id==='slider'});
+  clearDirty(id=>id==='slider');
   refresh();alert('已应用到硬件');
 }
 async function setMode(m){
   await api('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:m})});
   refresh();
 }
+
 // ===== 温度 / 转速历史曲线 =====
-// 纯手写 SVG 折线，不引任何前端库（镜像里没有外网可拉 CDN）。
-// 温度走左轴，指令转速%走右轴，实测 RPM 走最右侧独立轴（单位不同，不共用刻度）。
+// 纯手写 SVG，按容器实际像素绘制（不引外部库：镜像里没有外网）。
+// 三根独立纵轴：温度 °C（左） / 指令转速 %（右） / 实测 RPM（最右）。
 const SERIES=[
   {k:'cpu',label:'CPU 温度',color:'#4dabf7',axis:'L',unit:'°C',on:true},
   {k:'hdd',label:'机械盘最高温',color:'#ffa94d',axis:'L',unit:'°C',on:true},
@@ -994,11 +1041,12 @@ const SERIES=[
   {k:'rpm',label:'实测 RPM',color:'#b197fc',axis:'R2',unit:'RPM',on:true}
 ];
 const RANGE_LABEL={'1h':'1 小时','6h':'6 小时','24h':'24 小时','7d':'7 天'};
-let hist=null, range='6h', view={};
+let hist=null, range='1h', view={}, resizeTimer=0;
 
+function pad2(n){return String(n).padStart(2,'0')}
 function fmtTime(ts,long){
-  const d=new Date(ts*1000),p=x=>String(x).padStart(2,'0');
-  const hm=p(d.getHours())+':'+p(d.getMinutes());
+  const d=new Date(ts*1000);
+  const hm=pad2(d.getHours())+':'+pad2(d.getMinutes());
   return long?((d.getMonth()+1)+'/'+d.getDate()+' '+hm):hm;
 }
 function fmtBucket(b){
@@ -1014,7 +1062,7 @@ function niceMax(v){
 }
 function renderLegend(){
   document.getElementById('legend').innerHTML=SERIES.map(s=>
-    `<label><input type="checkbox" ${s.on?'checked':''} onchange="toggleSeries('${s.k}',this.checked)">`+
+    `<label title="单位：${s.unit}"><input type="checkbox" ${s.on?'checked':''} onchange="toggleSeries('${s.k}',this.checked)">`+
     `<i style="background:${s.color}"></i>${s.label}（${s.unit}）</label>`).join('');
 }
 function toggleSeries(k,on){
@@ -1031,9 +1079,8 @@ function setRange(r){
 async function loadHistory(){
   hist=await api('/api/history?range='+range+'&points=360');
   const hm=document.getElementById('histmeta');
-  if(hm)hm.textContent=(RANGE_LABEL[range]||range)+' · 每 '+fmtBucket(hist.bucket||5)+' 一点 · '+
-    (hist.t?hist.t.length:0)+' 点 · 采样 '+(hist.count||0)+' 条 · 文件 '+
-    ((hist.bytes||0)/1024).toFixed(1)+' KB';
+  if(hm)hm.textContent=(RANGE_LABEL[range]||range)+' · 每 '+fmtBucket(hist.bucket||5)+' · '+
+    (hist.t?hist.t.length:0)+' 点 · 采样 '+(hist.count||0)+' 条 · '+((hist.bytes||0)/1024).toFixed(1)+' KB';
   drawChart();renderStats();
 }
 function renderStats(){
@@ -1043,24 +1090,24 @@ function renderStats(){
     const k=it[0],label=it[1],unit=it[2],d=st[k];
     if(!d)return `<span class="stat">${label}<b>--</b></span>`;
     const u=unit||'';
-    return `<span class="stat">${label} · 最低 ${d.min}${u} / 平均 ${d.avg}${u}`+
-      `<b>最高 ${d.max} ${u}</b></span>`;
+    return `<span class="stat">${label} · 低 ${d.min}${u} / 均 ${d.avg}${u}<b>高 ${d.max} ${u}</b></span>`;
   }).join('');
 }
 function drawChart(){
-  const svg=document.getElementById('chart');
+  const svg=document.getElementById('chart'), box=document.getElementById('chartbox');
+  const W=Math.max(320,Math.round(box.clientWidth||800));
+  const H=Math.max(140,Math.round(box.clientHeight||292));
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   if(!hist||!hist.t||hist.t.length<2){
-    svg.setAttribute('viewBox','0 0 1000 320');
-    svg.innerHTML='<text x="500" y="168" fill="#6b7488" font-size="15" text-anchor="middle">暂无历史数据，等待采样…（部署后约 1 分钟开始出图）</text>';
-    view={};
-    return;
+    svg.innerHTML=`<text x="${W/2}" y="${H/2}" fill="#6b7488" font-size="12" text-anchor="middle">暂无历史数据，等待采样…（部署后约 1 分钟开始出图）</text>`;
+    view={};return;
   }
   const on=SERIES.filter(s=>s.on);
-  const n=hist.t.length, W=1000, H=320, T=16, B=30, L=58;
+  const n=hist.t.length, T=24, B=20, L=42;
   const hasR=on.some(s=>s.axis==='R');
   const hasR2=on.some(s=>s.axis==='R2');
-  const R=(hasR?52:18)+(hasR2?58:0);
-  const plotW=W-L-R, plotH=H-T-B;
+  const R=(hasR?34:10)+(hasR2?44:0);
+  const plotW=Math.max(60,W-L-R), plotH=Math.max(60,H-T-B);
   const X=i=>L+(n>1?plotW*i/(n-1):0);
 
   const tvals=[], rvals=[];
@@ -1076,9 +1123,9 @@ function drawChart(){
   if(tvals.length){
     tLo=Math.min.apply(null,tvals);
     tHi=Math.max.apply(null,tvals);
-    const pad=Math.max(1,(tHi-tLo)*0.15);
-    tLo=Math.floor(tLo-pad);
-    tHi=Math.ceil(tHi+pad);
+    const pd=Math.max(1,(tHi-tLo)*0.15);
+    tLo=Math.floor(tLo-pd);
+    tHi=Math.ceil(tHi+pd);
     if(tHi-tLo<4){const m=(tLo+tHi)/2;tLo=Math.floor(m-2);tHi=Math.ceil(m+2);}
   }
   const rpmHi=niceMax(rvals.length?Math.max.apply(null,rvals)*1.1:0);
@@ -1087,36 +1134,34 @@ function drawChart(){
   const Y2=v=>T+plotH-v/rpmHi*plotH;
 
   const p=[];
-  p.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="#10131a"/>`);
   for(let g=0;g<=4;g++){
     const y=T+plotH*g/4;
     p.push(`<line x1="${L}" y1="${y.toFixed(1)}" x2="${L+plotW}" y2="${y.toFixed(1)}" stroke="#242a38" stroke-width="1"/>`);
-    p.push(`<text x="${L-8}" y="${(y+4).toFixed(1)}" fill="#8b93a7" font-size="11" text-anchor="end">${(tLo+(tHi-tLo)*(1-g/4)).toFixed(0)}</text>`);
+    p.push(`<text x="${L-6}" y="${(y+3.5).toFixed(1)}" fill="#8b93a7" font-size="10" text-anchor="end">${(tLo+(tHi-tLo)*(1-g/4)).toFixed(0)}</text>`);
   }
-  p.push(`<text x="${L-8}" y="${T-4}" fill="#4dabf7" font-size="11" text-anchor="end">°C</text>`);
+  p.push(`<text x="${L-6}" y="${T-11}" fill="#4dabf7" font-size="10" text-anchor="end">°C</text>`);
   if(hasR){
-    const rx=L+plotW+8;
+    const rx=L+plotW+6;
     for(let g=0;g<=4;g++){
       const y=T+plotH*g/4;
-      p.push(`<text x="${rx}" y="${(y+4).toFixed(1)}" fill="#51cf66" font-size="11">${(100-100*g/4).toFixed(0)}</text>`);
+      p.push(`<text x="${rx}" y="${(y+3.5).toFixed(1)}" fill="#51cf66" font-size="10">${(100-100*g/4).toFixed(0)}</text>`);
     }
-    p.push(`<text x="${rx}" y="${T-4}" fill="#51cf66" font-size="11">%</text>`);
+    p.push(`<text x="${rx}" y="${T-11}" fill="#51cf66" font-size="10">%</text>`);
   }
   if(hasR2){
-    const rx2=L+plotW+(hasR?52:18)+6;
+    const rx2=L+plotW+(hasR?34:10)+6;
     for(let g=0;g<=4;g++){
       const y=T+plotH*g/4;
-      p.push(`<text x="${rx2}" y="${(y+4).toFixed(1)}" fill="#b197fc" font-size="11">${Math.round(rpmHi*(1-g/4))}</text>`);
+      p.push(`<text x="${rx2}" y="${(y+3.5).toFixed(1)}" fill="#b197fc" font-size="10">${Math.round(rpmHi*(1-g/4))}</text>`);
     }
-    p.push(`<text x="${rx2}" y="${T-4}" fill="#b197fc" font-size="11">RPM</text>`);
+    p.push(`<text x="${rx2}" y="${T-11}" fill="#b197fc" font-size="10">RPM</text>`);
   }
-  const ticks=5;
+  const ticks=6;
   for(let k=0;k<ticks;k++){
     const idx=Math.round((n-1)*k/(ticks-1));
     const x=X(idx);
     const anchor=k===0?'start':(k===ticks-1?'end':'middle');
-    p.push(`<line x1="${x.toFixed(1)}" y1="${T+plotH}" x2="${x.toFixed(1)}" y2="${T+plotH+4}" stroke="#3a4152" stroke-width="1"/>`);
-    p.push(`<text x="${x.toFixed(1)}" y="${T+plotH+18}" fill="#6b7488" font-size="11" text-anchor="${anchor}">${fmtTime(hist.t[idx],range==='7d')}</text>`);
+    p.push(`<text x="${x.toFixed(1)}" y="${H-6}" fill="#6b7488" font-size="10" text-anchor="${anchor}">${fmtTime(hist.t[idx],range==='7d')}</text>`);
   }
   p.push(`<rect x="${L}" y="${T}" width="${plotW}" height="${plotH}" fill="none" stroke="#2a3040" stroke-width="1"/>`);
 
@@ -1131,17 +1176,16 @@ function drawChart(){
       d+=(pen?'L':'M')+X(i).toFixed(1)+' '+yf(a[i]).toFixed(1)+' ';
       pen=true;
     }
-    if(d)p.push(`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`);
+    if(d)p.push(`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>`);
   });
   p.push(`<line id="cross" x1="0" y1="${T}" x2="0" y2="${T+plotH}" stroke="#8b93a7" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>`);
-  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   svg.innerHTML=p.join('');
-  view={L:L,plotW:plotW,n:n,X:X,ys:ys};
+  view={L:L,plotW:plotW,n:n,X:X,ys:ys,H:H};
 }
 function onMove(e){
   if(!hist||!hist.t||hist.t.length<2||!view.X)return;
-  const svg=document.getElementById('chart'), box=svg.getBoundingClientRect();
-  const vx=(e.clientX-box.left)/box.width*1000;
+  const box=document.getElementById('chartbox'), r=box.getBoundingClientRect();
+  const vx=e.clientX-r.left;
   let i=Math.round((vx-view.L)/(view.plotW||1)*(view.n-1));
   i=Math.max(0,Math.min(view.n-1,i));
   const cross=document.getElementById('cross');
@@ -1152,32 +1196,27 @@ function onMove(e){
     const v=(hist[s.k]||[])[i];
     html+=`<div><span style="color:${s.color}">■</span> ${s.label}：${v==null?'--':v+' '+s.unit}</div>`;
   });
-  const tip=document.getElementById('tip'), cw=document.getElementById('chartbox');
+  const tip=document.getElementById('tip');
   tip.innerHTML=html;
   tip.style.display='block';
-  const px=e.clientX-cw.getBoundingClientRect().left;
-  const pw=tip.offsetWidth||160;
-  tip.style.left=Math.max(4,Math.min(px+14,cw.clientWidth-pw-6))+'px';
-  tip.style.top='8px';
+  const px=view.X(i), tw=tip.offsetWidth||150;
+  tip.style.left=Math.max(4,Math.min(px+12,r.width-tw-6))+'px';
+  tip.style.top='6px';
 }
 function onLeave(){
-  const cross=document.getElementById('cross');
-  if(cross)cross.style.display='none';
-  const tip=document.getElementById('tip');
-  if(tip)tip.style.display='none';
-}
-async function saveHistCfg(){
-  const v=parseFloat(document.getElementById('hist_retention_days').value);
-  const r=await api('/api/histcfg',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({hist_retention_days:v})});
-  clearDirty(id=>HIST_IDS.indexOf(id)>=0);
-  alert(r.ok?('已保存（保留 '+r.retention_days+' 天），本次清理 '+r.dropped+' 条超期采样'):'保存失败');
-  refresh();loadHistory();
+  const c=document.getElementById('cross');
+  if(c)c.style.display='none';
+  const t=document.getElementById('tip');
+  if(t)t.style.display='none';
 }
 document.getElementById('chart').addEventListener('mousemove',onMove);
 document.getElementById('chart').addEventListener('mouseleave',onLeave);
+window.addEventListener('resize',()=>{
+  clearTimeout(resizeTimer);
+  resizeTimer=setTimeout(()=>drawChart(),160);
+});
 renderLegend();
-setRange('6h');
+setRange('1h');
 setInterval(loadHistory,30000);
 refresh();setInterval(refresh,5000);
 </script></body></html>
@@ -1254,6 +1293,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     s["log_bytes"] = 0
                 s["hist_retention_days"] = cfg.get("hist_retention_days", 7)
+                s["retention_days"] = cfg.get("log_retention_days", 7)
                 try:
                     s["hist_bytes"] = os.path.getsize(HIST_FILE)
                 except Exception:
@@ -1293,16 +1333,21 @@ class Handler(BaseHTTPRequestHandler):
             save_cfg()
             self._send(200, json.dumps({"ok": True}))
         elif self.path == "/api/logcfg":
-            if "log_retention_days" in b:
-                try:
-                    v = float(b["log_retention_days"])
-                except Exception:
-                    v = 7.0
-                cfg["log_retention_days"] = max(1.0, min(365.0, v))
+            # 界面上只留一个「保留天数」，一次把日志与历史采样设成同一个值
+            for k in ("log_retention_days", "hist_retention_days"):
+                if k in b:
+                    try:
+                        v = float(b[k])
+                    except Exception:
+                        v = 7.0
+                    cfg[k] = max(1.0, min(365.0, v))
             save_cfg()
             dropped = prune_log(force=True)
-            self._send(200, json.dumps({"ok": True, "retention_days": cfg["log_retention_days"],
-                                        "dropped": dropped}))
+            hdropped = prune_history(force=True)
+            self._send(200, json.dumps({"ok": True,
+                                        "retention_days": cfg["log_retention_days"],
+                                        "dropped": dropped,
+                                        "hist_dropped": hdropped}))
         elif self.path == "/api/histcfg":
             if "hist_retention_days" in b:
                 try:
