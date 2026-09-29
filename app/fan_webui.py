@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 DATA_DIR = "/data"
 CFG_FILE = os.path.join(DATA_DIR, "curve-config.json")
 LOG_FILE = os.path.join(DATA_DIR, "fan.log")   # 明文日志，按天保留
+HIST_FILE = os.path.join(DATA_DIR, "history.tsv")   # 历史采样，界面曲线用
 PORT = 8080
 
 # 默认档位：t <= below 则取该档 pct（按低于阈值匹配，从上往下第一个命中）
@@ -52,6 +53,9 @@ DEFAULT_CFG = {
 
     # ---- 日志 ----
     "log_retention_days": 7,    # 日志保留天数，超期自动删除
+
+    # ---- 历史曲线 ----
+    "hist_retention_days": 7,   # 历史采样保留天数，超期自动删除
 }
 
 cfg = {}
@@ -162,6 +166,216 @@ def read_log_tail(n=200):
         return []
     lines = data.splitlines()
     return lines[-n:] if n else lines
+
+
+# ---------------- 历史采样（界面曲线） ----------------
+# 每轮控制循环记一条：epoch,CPU温度,机械盘最高温,指令转速%,风扇RPM均值（无值留空）
+# 先缓存在内存，累计约 60 秒再落盘一次，减少磁盘写入。
+HIST_TAIL_BYTES = 8 * 1024 * 1024      # 读文件时最多回看 8MB（覆盖 7 天以上采样）
+_hist_buf = []
+_hist_lock = threading.Lock()
+_last_hist_prune = 0.0
+
+
+def _fmt_num(v, nd=1):
+    if v is None:
+        return ""
+    try:
+        return ("%." + str(int(nd)) + "f") % float(v)
+    except Exception:
+        return ""
+
+
+def record_history(temp, hdd, pct, rpms):
+    """记一条历史采样。四个值全为空则不记（避免写入无意义的空行）。"""
+    rpm = None
+    try:
+        vals = [float(x["rpm"]) for x in (rpms or []) if x.get("rpm") is not None]
+        if vals:
+            rpm = sum(vals) / len(vals)
+    except Exception:
+        rpm = None
+    if temp is None and hdd is None and pct is None and rpm is None:
+        return
+    line = "%d,%s,%s,%s,%s\n" % (int(time.time()), _fmt_num(temp),
+                                 _fmt_num(hdd), _fmt_num(pct, 0), _fmt_num(rpm, 0))
+    with _hist_lock:
+        _hist_buf.append(line)
+        if len(_hist_buf) >= 12:
+            _flush_history_locked()
+
+
+def _flush_history_locked():
+    if not _hist_buf:
+        return
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(HIST_FILE, "a", encoding="utf-8") as f:
+            f.writelines(_hist_buf)
+        del _hist_buf[:]
+    except Exception:
+        pass
+
+
+def flush_history():
+    with _hist_lock:
+        _flush_history_locked()
+
+
+def prune_history(force=False):
+    """删掉超过 hist_retention_days 天的采样。每小时最多跑一次（force 除外）。"""
+    global _last_hist_prune
+    now = time.time()
+    if not force and now - _last_hist_prune < 3600:
+        return 0
+    _last_hist_prune = now
+    flush_history()
+    try:
+        days = float(cfg.get("hist_retention_days", 7) or 7)
+    except Exception:
+        days = 7
+    cutoff = int(now - days * 86400)
+    try:
+        with open(HIST_FILE, encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return 0
+    keep, dropped = [], 0
+    for ln in lines:
+        try:
+            ts = int(ln.split(",", 1)[0])
+        except Exception:
+            keep.append(ln)          # 认不出来的行一律保留，宁可多留不可误删
+            continue
+        if ts >= cutoff:
+            keep.append(ln)
+        else:
+            dropped += 1
+    if dropped:
+        tmp = HIST_FILE + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.writelines(keep)
+            os.replace(tmp, HIST_FILE)
+        except Exception:
+            return 0
+    return dropped
+
+
+def parse_range(s):
+    """把 1h / 6h / 24h / 7d 或纯秒数解析成秒（限制 5 分钟 ~ 90 天）。"""
+    s = (s or "").strip().lower()
+    try:
+        if s.endswith("d"):
+            secs = int(float(s[:-1]) * 86400)
+        elif s.endswith("h"):
+            secs = int(float(s[:-1]) * 3600)
+        elif s.endswith("m"):
+            secs = int(float(s[:-1]) * 60)
+        else:
+            secs = int(float(s))
+    except Exception:
+        secs = 6 * 3600
+    return max(300, min(90 * 86400, secs))
+
+
+def read_history(seconds, points=360):
+    """按时间桶聚合历史采样，返回曲线数据（桶内取平均，另附区间极值统计）。
+
+    无论跨 1 小时还是 7 天，返回的点数都固定在 ~points 个，
+    因此前端不会因为切换大跨度而变卡或被大数据量拖死。
+    """
+    flush_history()
+    now = int(time.time())
+    frm = now - int(seconds)
+    try:
+        size = os.path.getsize(HIST_FILE)
+    except Exception:
+        size = 0
+    rows = []
+    if size:
+        try:
+            with open(HIST_FILE, "rb") as f:
+                if size > HIST_TAIL_BYTES:
+                    f.seek(size - HIST_TAIL_BYTES)
+                    f.readline()          # 丢掉可能被截断的半行
+                rows = f.read().decode("utf-8", "replace").splitlines()
+        except Exception:
+            rows = []
+
+    n = max(30, min(2000, int(points)))
+    bucket = max(1, int(round(max(1, int(seconds)) / float(n))))
+
+    FIELDS = ("cpu", "hdd", "pct", "rpm")
+    acc, g, count = {}, {}, 0
+    for f in FIELDS:
+        g[f] = [0, 0.0, None, None]      # [条数, 累加, 最小, 最大]
+
+    for ln in rows:
+        p = ln.split(",")
+        if len(p) != 5:
+            continue
+        try:
+            ts = int(p[0])
+        except Exception:
+            continue
+        if ts < frm or ts > now:
+            continue
+        count += 1
+        k = ts // bucket
+        a = acc.get(k)
+        if a is None:
+            a = acc[k] = {"n": 0}
+            for f in FIELDS:
+                a[f + "_s"] = 0.0
+                a[f + "_n"] = 0
+        a["n"] += 1
+        for f, idx in (("cpu", 1), ("hdd", 2), ("pct", 3), ("rpm", 4)):
+            if not p[idx]:
+                continue
+            try:
+                v = float(p[idx])
+            except Exception:
+                continue
+            a[f + "_s"] += v
+            a[f + "_n"] += 1
+            gg = g[f]
+            gg[0] += 1
+            gg[1] += v
+            gg[2] = v if gg[2] is None else min(gg[2], v)
+            gg[3] = v if gg[3] is None else max(gg[3], v)
+
+    b0, b1 = frm // bucket, now // bucket
+    t_l = []
+    series = {}
+    for f in FIELDS:
+        series[f] = []
+    for k in range(b0, b1 + 1):
+        t_l.append(k * bucket)
+        a = acc.get(k)
+        for f in FIELDS:
+            if not a or not a[f + "_n"]:
+                series[f].append(None)
+                continue
+            v = a[f + "_s"] / a[f + "_n"]
+            series[f].append(round(v) if f == "rpm" else round(v, 1))
+
+    stats = {}
+    for f in FIELDS:
+        cnt, tot, mn, mx = g[f]
+        if not cnt:
+            stats[f] = None
+        elif f == "rpm":
+            stats[f] = {"min": round(mn), "avg": round(tot / cnt), "max": round(mx)}
+        else:
+            stats[f] = {"min": round(mn, 1), "avg": round(tot / cnt, 1), "max": round(mx, 1)}
+
+    return {
+        "range": int(seconds), "bucket": bucket, "from": frm, "to": now,
+        "count": count, "bytes": size,
+        "t": t_l, "cpu": series["cpu"], "hdd": series["hdd"],
+        "pct": series["pct"], "rpm": series["rpm"], "stats": stats,
+    }
 
 
 def find_hwmon(name):
@@ -326,6 +540,7 @@ def control_loop():
                 t = None
 
             prune_log()          # 每小时最多执行一次
+            prune_history()      # 同上
 
             # ---- 磁盘温度 ----
             all_disks, watched = scan_disks()
@@ -397,6 +612,12 @@ def control_loop():
                 if last_pct is None or abs(pct - last_pct) >= 0.5:
                     apply_pwm(pct, reason)
                     last_pct = pct
+
+            # ---- 记录一条历史采样（t 为 None 时也会记录盘温与转速） ----
+            with lock:
+                _rt, _rh, _rp = state["temp"], state["hdd_max"], state["pct"]
+                _rr = list(state["rpm"])
+            record_history(_rt, _rh, _rp, _rr)
         except Exception as e:
             log("异常: %s" % e)
 
@@ -458,6 +679,16 @@ input[type=checkbox]{width:auto}
 .hint{font-size:12px;color:#6b7488;margin-top:8px;line-height:1.6}
 .warn{color:#ffa94d}
 .mono{font-family:ui-monospace,Menlo,monospace}
+button.mini{padding:5px 12px;font-size:13px}
+.rbtn.on{background:#3b7cff;box-shadow:inset 0 0 0 1px #7aa6ff}
+.chartbox{position:relative;margin-top:6px}
+.chartbox svg{width:100%;height:auto;display:block;border-radius:8px;background:#10131a}
+.tip{position:absolute;display:none;pointer-events:none;background:#0e1117;border:1px solid #2f3648;border-radius:6px;padding:7px 10px;font-size:12px;line-height:1.65;color:#cfd6e6;white-space:nowrap;z-index:5;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;color:#b6c0d6}
+.legend label{display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.stat{background:#151922;border:1px solid #262c3a;border-radius:8px;padding:8px 12px;font-size:12px;color:#8b93a7}
+.stat b{display:block;font-size:15px;color:#e6e8ee;font-weight:600;margin-top:2px}
 </style></head><body>
 <h1>QU805 风扇温控</h1>
 <div class="sub">qnap8528 EC 驱动 · ITE8528E · 自动调速中<span id="dirtyTag" class="tag hold" style="display:none;margin-left:8px">有未保存的修改 · 自动刷新已暂停覆盖</span></div>
@@ -469,6 +700,36 @@ input[type=checkbox]{width:auto}
   <div class="card"><div class="k">PWM 原始值</div><div class="v" id="pwm">--</div></div>
   <div class="card"><div class="k">实测 RPM</div><div class="v" id="rpm">--</div></div>
   <div class="card"><div class="k">模式 / 状态</div><div class="v" id="mode" style="font-size:15px">--</div></div>
+</div>
+
+<div class="panel">
+  <h2>温度 / 转速历史</h2>
+  <div class="row">
+    <button class="gray mini rbtn" data-r="1h" onclick="setRange('1h')">1 小时</button>
+    <button class="gray mini rbtn" data-r="6h" onclick="setRange('6h')">6 小时</button>
+    <button class="gray mini rbtn" data-r="24h" onclick="setRange('24h')">24 小时</button>
+    <button class="gray mini rbtn" data-r="7d" onclick="setRange('7d')">7 天</button>
+    <span id="histmeta" class="tag">--</span>
+    <span style="font-size:13px;color:#8b93a7;margin-left:auto">保留天数</span>
+    <input id="hist_retention_days" type="number" step="1" min="1" max="365" style="width:80px">
+    <button id="saveHistBtn" onclick="saveHistCfg()">保存</button>
+  </div>
+  <div class="row legend" id="legend"></div>
+  <div class="chartbox" id="chartbox">
+    <svg id="chart" viewBox="0 0 1000 320" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="tip" class="tip"></div>
+  </div>
+  <div class="row" id="histstats"></div>
+  <div class="hint">
+    采样间隔与控制周期一致（默认 <span class="mono">5</span> 秒），明文追加到
+    <span class="mono">/data/history.tsv</span>（宿主机
+    <span class="mono">/vol1/docker/fnos-fan-webui/data/history.tsv</span>），容器重启不丢；
+    超过「保留天数」的采样会被自动删除。<br>
+    曲线按所选跨度自动聚合成约 360 个点（桶内取平均，区间最低/平均/最高在下方单独统计），
+    所以切到 7 天也不会变卡。鼠标移到图上可看该时刻的精确数值。<br>
+    左侧温度轴对应 CPU 与机械盘最高温；转速轴对应指令转速百分比；勾选「实测 RPM」后会在最右侧
+    再出现一条独立的 RPM 轴（单位不同，不共用刻度，避免两条不同量纲的线互相误导）。
+  </div>
 </div>
 
 <div class="panel">
@@ -611,6 +872,7 @@ async function refresh(){
   setVal('hdd_sensors',(s.hdd_sensors||[]).join(','));
   if(!dirty.has('hdd_watch'))document.getElementById('hddlist_row').style.display=(s.hdd_watch==='list')?'flex':'none';
   setVal('log_retention_days',s.log_retention_days);
+  setVal('hist_retention_days',s.hist_retention_days);
   const lm=document.getElementById('logmeta');
   if(lm)lm.textContent='保留 '+s.log_retention_days+' 天 · 文件 '+(((s.log_bytes||0)/1024).toFixed(1))+' KB · 显示最近 '+((s.log||[]).length)+' 行';
 }
@@ -622,6 +884,7 @@ let stepSeq=0, dirty=new Set(), stepsDirty=false;
 const CURVE_IDS=['hold_trigger','hold_seconds','min_pct','temp_source'];
 const HDD_IDS=['hdd_enabled','hdd_trigger_temp','hdd_pct','hdd_hold_seconds','hdd_watch','hdd_sensors'];
 const LOG_IDS=['log_retention_days'];
+const HIST_IDS=['hist_retention_days'];
 function isStepId(id){return /^[bp]\\d+$/.test(id)}
 function anyDirty(ids){return ids.some(function(i){return dirty.has(i)})}
 function setVal(id,v){
@@ -636,10 +899,11 @@ function clearDirty(pred){
 function paintDirty(){
   const tag=document.getElementById('dirtyTag');
   if(tag)tag.style.display=dirty.size?'inline-block':'none';
-  const b1=document.getElementById('saveCurveBtn'),b2=document.getElementById('saveHddBtn'),b3=document.getElementById('saveLogBtn');
+  const b1=document.getElementById('saveCurveBtn'),b2=document.getElementById('saveHddBtn'),b3=document.getElementById('saveLogBtn'),b4=document.getElementById('saveHistBtn');
   if(b1)b1.className=(anyDirty(CURVE_IDS)||stepsDirty)?'btn-dirty':'';
   if(b2)b2.className=anyDirty(HDD_IDS)?'btn-dirty':'';
   if(b3)b3.className=anyDirty(LOG_IDS)?'btn-dirty':'';
+  if(b4)b4.className=anyDirty(HIST_IDS)?'btn-dirty':'';
 }
 document.addEventListener('input',function(e){
   const t=e.target;if(!t||!t.id)return;
@@ -720,6 +984,201 @@ async function setMode(m){
   await api('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:m})});
   refresh();
 }
+// ===== 温度 / 转速历史曲线 =====
+// 纯手写 SVG 折线，不引任何前端库（镜像里没有外网可拉 CDN）。
+// 温度走左轴，指令转速%走右轴，实测 RPM 走最右侧独立轴（单位不同，不共用刻度）。
+const SERIES=[
+  {k:'cpu',label:'CPU 温度',color:'#4dabf7',axis:'L',unit:'°C',on:true},
+  {k:'hdd',label:'机械盘最高温',color:'#ffa94d',axis:'L',unit:'°C',on:true},
+  {k:'pct',label:'指令转速',color:'#51cf66',axis:'R',unit:'%',on:true},
+  {k:'rpm',label:'实测 RPM',color:'#b197fc',axis:'R2',unit:'RPM',on:true}
+];
+const RANGE_LABEL={'1h':'1 小时','6h':'6 小时','24h':'24 小时','7d':'7 天'};
+let hist=null, range='6h', view={};
+
+function fmtTime(ts,long){
+  const d=new Date(ts*1000),p=x=>String(x).padStart(2,'0');
+  const hm=p(d.getHours())+':'+p(d.getMinutes());
+  return long?((d.getMonth()+1)+'/'+d.getDate()+' '+hm):hm;
+}
+function fmtBucket(b){
+  if(b<60)return b+' 秒';
+  if(b<3600)return Math.round(b/60)+' 分钟';
+  return Math.round(b/3600)+' 小时';
+}
+function niceMax(v){
+  if(!(v>0))return 1000;
+  const pows=[200,500,1000,1500,2000,2500,3000,4000,5000,6000,8000,10000,12000,15000];
+  for(let i=0;i<pows.length;i++){if(v<=pows[i])return pows[i];}
+  return Math.ceil(v/1000)*1000;
+}
+function renderLegend(){
+  document.getElementById('legend').innerHTML=SERIES.map(s=>
+    `<label><input type="checkbox" ${s.on?'checked':''} onchange="toggleSeries('${s.k}',this.checked)">`+
+    `<i style="background:${s.color}"></i>${s.label}（${s.unit}）</label>`).join('');
+}
+function toggleSeries(k,on){
+  SERIES.forEach(s=>{if(s.k===k)s.on=on});
+  drawChart();
+}
+function setRange(r){
+  range=r;
+  document.querySelectorAll('.rbtn').forEach(b=>{
+    b.className='gray mini rbtn'+(b.getAttribute('data-r')===r?' on':'');
+  });
+  loadHistory();
+}
+async function loadHistory(){
+  hist=await api('/api/history?range='+range+'&points=360');
+  const hm=document.getElementById('histmeta');
+  if(hm)hm.textContent=(RANGE_LABEL[range]||range)+' · 每 '+fmtBucket(hist.bucket||5)+' 一点 · '+
+    (hist.t?hist.t.length:0)+' 点 · 采样 '+(hist.count||0)+' 条 · 文件 '+
+    ((hist.bytes||0)/1024).toFixed(1)+' KB';
+  drawChart();renderStats();
+}
+function renderStats(){
+  const st=(hist&&hist.stats)||{};
+  const items=[['cpu','CPU 温度','°C'],['hdd','机械盘最高温','°C'],['pct','指令转速','%'],['rpm','实测 RPM','']];
+  document.getElementById('histstats').innerHTML=items.map(it=>{
+    const k=it[0],label=it[1],unit=it[2],d=st[k];
+    if(!d)return `<span class="stat">${label}<b>--</b></span>`;
+    const u=unit||'';
+    return `<span class="stat">${label} · 最低 ${d.min}${u} / 平均 ${d.avg}${u}`+
+      `<b>最高 ${d.max} ${u}</b></span>`;
+  }).join('');
+}
+function drawChart(){
+  const svg=document.getElementById('chart');
+  if(!hist||!hist.t||hist.t.length<2){
+    svg.setAttribute('viewBox','0 0 1000 320');
+    svg.innerHTML='<text x="500" y="168" fill="#6b7488" font-size="15" text-anchor="middle">暂无历史数据，等待采样…（部署后约 1 分钟开始出图）</text>';
+    view={};
+    return;
+  }
+  const on=SERIES.filter(s=>s.on);
+  const n=hist.t.length, W=1000, H=320, T=16, B=30, L=58;
+  const hasR=on.some(s=>s.axis==='R');
+  const hasR2=on.some(s=>s.axis==='R2');
+  const R=(hasR?52:18)+(hasR2?58:0);
+  const plotW=W-L-R, plotH=H-T-B;
+  const X=i=>L+(n>1?plotW*i/(n-1):0);
+
+  const tvals=[], rvals=[];
+  on.forEach(s=>{
+    const a=hist[s.k]||[];
+    for(let i=0;i<a.length;i++){
+      if(a[i]==null)continue;
+      if(s.axis==='L')tvals.push(a[i]);
+      if(s.axis==='R2')rvals.push(a[i]);
+    }
+  });
+  let tLo=0, tHi=100;
+  if(tvals.length){
+    tLo=Math.min.apply(null,tvals);
+    tHi=Math.max.apply(null,tvals);
+    const pad=Math.max(1,(tHi-tLo)*0.15);
+    tLo=Math.floor(tLo-pad);
+    tHi=Math.ceil(tHi+pad);
+    if(tHi-tLo<4){const m=(tLo+tHi)/2;tLo=Math.floor(m-2);tHi=Math.ceil(m+2);}
+  }
+  const rpmHi=niceMax(rvals.length?Math.max.apply(null,rvals)*1.1:0);
+  const YL=v=>T+plotH-(v-tLo)/(tHi-tLo)*plotH;
+  const YR=v=>T+plotH-v/100*plotH;
+  const Y2=v=>T+plotH-v/rpmHi*plotH;
+
+  const p=[];
+  p.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="#10131a"/>`);
+  for(let g=0;g<=4;g++){
+    const y=T+plotH*g/4;
+    p.push(`<line x1="${L}" y1="${y.toFixed(1)}" x2="${L+plotW}" y2="${y.toFixed(1)}" stroke="#242a38" stroke-width="1"/>`);
+    p.push(`<text x="${L-8}" y="${(y+4).toFixed(1)}" fill="#8b93a7" font-size="11" text-anchor="end">${(tLo+(tHi-tLo)*(1-g/4)).toFixed(0)}</text>`);
+  }
+  p.push(`<text x="${L-8}" y="${T-4}" fill="#4dabf7" font-size="11" text-anchor="end">°C</text>`);
+  if(hasR){
+    const rx=L+plotW+8;
+    for(let g=0;g<=4;g++){
+      const y=T+plotH*g/4;
+      p.push(`<text x="${rx}" y="${(y+4).toFixed(1)}" fill="#51cf66" font-size="11">${(100-100*g/4).toFixed(0)}</text>`);
+    }
+    p.push(`<text x="${rx}" y="${T-4}" fill="#51cf66" font-size="11">%</text>`);
+  }
+  if(hasR2){
+    const rx2=L+plotW+(hasR?52:18)+6;
+    for(let g=0;g<=4;g++){
+      const y=T+plotH*g/4;
+      p.push(`<text x="${rx2}" y="${(y+4).toFixed(1)}" fill="#b197fc" font-size="11">${Math.round(rpmHi*(1-g/4))}</text>`);
+    }
+    p.push(`<text x="${rx2}" y="${T-4}" fill="#b197fc" font-size="11">RPM</text>`);
+  }
+  const ticks=5;
+  for(let k=0;k<ticks;k++){
+    const idx=Math.round((n-1)*k/(ticks-1));
+    const x=X(idx);
+    const anchor=k===0?'start':(k===ticks-1?'end':'middle');
+    p.push(`<line x1="${x.toFixed(1)}" y1="${T+plotH}" x2="${x.toFixed(1)}" y2="${T+plotH+4}" stroke="#3a4152" stroke-width="1"/>`);
+    p.push(`<text x="${x.toFixed(1)}" y="${T+plotH+18}" fill="#6b7488" font-size="11" text-anchor="${anchor}">${fmtTime(hist.t[idx],range==='7d')}</text>`);
+  }
+  p.push(`<rect x="${L}" y="${T}" width="${plotW}" height="${plotH}" fill="none" stroke="#2a3040" stroke-width="1"/>`);
+
+  const ys={};
+  on.forEach(s=>{
+    const yf=s.axis==='L'?YL:(s.axis==='R'?YR:Y2);
+    ys[s.k]=yf;
+    const a=hist[s.k]||[];
+    let d='', pen=false;
+    for(let i=0;i<a.length;i++){
+      if(a[i]==null){pen=false;continue;}
+      d+=(pen?'L':'M')+X(i).toFixed(1)+' '+yf(a[i]).toFixed(1)+' ';
+      pen=true;
+    }
+    if(d)p.push(`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`);
+  });
+  p.push(`<line id="cross" x1="0" y1="${T}" x2="0" y2="${T+plotH}" stroke="#8b93a7" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>`);
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svg.innerHTML=p.join('');
+  view={L:L,plotW:plotW,n:n,X:X,ys:ys};
+}
+function onMove(e){
+  if(!hist||!hist.t||hist.t.length<2||!view.X)return;
+  const svg=document.getElementById('chart'), box=svg.getBoundingClientRect();
+  const vx=(e.clientX-box.left)/box.width*1000;
+  let i=Math.round((vx-view.L)/(view.plotW||1)*(view.n-1));
+  i=Math.max(0,Math.min(view.n-1,i));
+  const cross=document.getElementById('cross');
+  if(cross){cross.setAttribute('x1',view.X(i));cross.setAttribute('x2',view.X(i));cross.style.display='';}
+  let html=`<b>${fmtTime(hist.t[i],range==='7d')}</b>`;
+  SERIES.forEach(s=>{
+    if(!s.on)return;
+    const v=(hist[s.k]||[])[i];
+    html+=`<div><span style="color:${s.color}">■</span> ${s.label}：${v==null?'--':v+' '+s.unit}</div>`;
+  });
+  const tip=document.getElementById('tip'), cw=document.getElementById('chartbox');
+  tip.innerHTML=html;
+  tip.style.display='block';
+  const px=e.clientX-cw.getBoundingClientRect().left;
+  const pw=tip.offsetWidth||160;
+  tip.style.left=Math.max(4,Math.min(px+14,cw.clientWidth-pw-6))+'px';
+  tip.style.top='8px';
+}
+function onLeave(){
+  const cross=document.getElementById('cross');
+  if(cross)cross.style.display='none';
+  const tip=document.getElementById('tip');
+  if(tip)tip.style.display='none';
+}
+async function saveHistCfg(){
+  const v=parseFloat(document.getElementById('hist_retention_days').value);
+  const r=await api('/api/histcfg',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({hist_retention_days:v})});
+  clearDirty(id=>HIST_IDS.indexOf(id)>=0);
+  alert(r.ok?('已保存（保留 '+r.retention_days+' 天），本次清理 '+r.dropped+' 条超期采样'):'保存失败');
+  refresh();loadHistory();
+}
+document.getElementById('chart').addEventListener('mousemove',onMove);
+document.getElementById('chart').addEventListener('mouseleave',onLeave);
+renderLegend();
+setRange('6h');
+setInterval(loadHistory,30000);
 refresh();setInterval(refresh,5000);
 </script></body></html>
 """
@@ -764,6 +1223,18 @@ class Handler(BaseHTTPRequestHandler):
             if body:
                 body += "\n"
             self._send(200, body, "text/plain")
+        elif self.path.split("?")[0] == "/api/history":
+            q = {}
+            parts = self.path.split("?", 1)
+            if len(parts) > 1:
+                for kv in parts[1].split("&"):
+                    k, _, v = kv.partition("=")
+                    q[k] = v
+            try:
+                pts = int(q.get("points") or 360)
+            except Exception:
+                pts = 360
+            self._send(200, json.dumps(read_history(parse_range(q.get("range")), pts)))
         elif self.path == "/api/status":
             with lock:
                 s = dict(state)
@@ -782,6 +1253,11 @@ class Handler(BaseHTTPRequestHandler):
                     s["log_bytes"] = os.path.getsize(LOG_FILE)
                 except Exception:
                     s["log_bytes"] = 0
+                s["hist_retention_days"] = cfg.get("hist_retention_days", 7)
+                try:
+                    s["hist_bytes"] = os.path.getsize(HIST_FILE)
+                except Exception:
+                    s["hist_bytes"] = 0
                 for k in ("hdd_enabled", "hdd_trigger_temp", "hdd_pct",
                           "hdd_hold_seconds", "hdd_watch", "hdd_sensors"):
                     s[k] = cfg.get(k, DEFAULT_CFG[k])
@@ -827,6 +1303,18 @@ class Handler(BaseHTTPRequestHandler):
             dropped = prune_log(force=True)
             self._send(200, json.dumps({"ok": True, "retention_days": cfg["log_retention_days"],
                                         "dropped": dropped}))
+        elif self.path == "/api/histcfg":
+            if "hist_retention_days" in b:
+                try:
+                    v = float(b["hist_retention_days"])
+                except Exception:
+                    v = 7.0
+                cfg["hist_retention_days"] = max(1.0, min(365.0, v))
+            save_cfg()
+            dropped = prune_history(force=True)
+            self._send(200, json.dumps({"ok": True,
+                                        "retention_days": cfg["hist_retention_days"],
+                                        "dropped": dropped}))
         elif self.path == "/api/hdd":
             for k in ("hdd_enabled", "hdd_trigger_temp", "hdd_pct",
                       "hdd_hold_seconds", "hdd_watch"):
@@ -852,6 +1340,9 @@ if __name__ == "__main__":
     _d = prune_log(force=True)
     if _d:
         log("启动清理：删除 %d 条超期日志" % _d)
+    _h = prune_history(force=True)
+    if _h:
+        log("启动清理：删除 %d 条超期历史采样" % _h)
     t = threading.Thread(target=control_loop, daemon=True)
     t.start()
     HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
