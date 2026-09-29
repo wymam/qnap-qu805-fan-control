@@ -18,6 +18,11 @@
 > per‑disk temperature protection, and persistent logs. Includes a kernel postinst hook
 > so a kernel upgrade no longer silently breaks the fan driver.
 
+![QU805 风扇温控 Web 界面](docs/screenshot.png)
+
+*1920×1080 一屏装得下，不用滚动：左侧是温度 / 转速历史曲线、手动模式与运行日志，
+右侧是温度档位规则与机械硬盘高温保护。*
+
 ---
 
 ## 目录
@@ -172,38 +177,7 @@ sudo bash install.sh --skip-app
 
 不想用一键脚本的话，这是它内部做的事。
 
-### 5.1 建立 SSH 通道（可选）
-
-macOS/Linux 有 `sshpass` 就用它；没有的话用 `expect` 建 ControlMaster：
-
-```bash
-cat > /tmp/ssh_mux.exp <<'EOF'
-#!/usr/bin/expect -f
-set timeout 30
-spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  -o NumberOfPasswordPrompts=1 -o ControlMaster=yes \
-  -o ControlPath=/tmp/ssh_mux_%h -o ControlPersist=1800 -Nf <用户名>@<NAS_IP>
-expect { -re "(?i)password:" { send "<密码>\r" } timeout { puts "TIMEOUT"; exit 1 } }
-expect { -re "(?i)password:" { puts "AUTH_FAILED"; exit 1 } timeout { puts "MUX_OK" } }
-EOF
-chmod +x /tmp/ssh_mux.exp && /usr/bin/expect /tmp/ssh_mux.exp
-S=/tmp/ssh_mux_<NAS_IP>
-ssh -o ControlPath=$S <用户名>@<NAS_IP> 'bash -s' < 本地脚本.sh
-```
-
-Windows 上没有 `sshpass` 也没有 `expect`，可以用仓库里的
-[`tools/rexec.py`](tools/rexec.py)（paramiko 密码认证 + 管道喂脚本）：
-
-```bash
-PY="C:/Users/<你>/.../python.exe"      # 任意带 paramiko 的 Python
-$PY -m pip install paramiko
-$PY tools/rexec.py -c 'uname -r; uptime'    # 单条命令
-$PY tools/rexec.py -f 本地脚本.sh           # 多行脚本
-```
-
-凭证从环境变量或 `%TEMP%\.nas_cred.json` 读取，**不要写进仓库**。
-
-### 5.2 硬件体检
+### 5.1 硬件体检
 
 ```bash
 uname -r
@@ -218,7 +192,7 @@ sensors
 > `hwmon*` 是符号链接，`find` 默认不跟随，**即使 `pwm1` 存在也永远返回 0**。
 > 用 `ls -1 /sys/class/hwmon/*/pwm*`。
 
-### 5.3 补机型配置
+### 5.2 补机型配置
 
 ```bash
 python3 scripts/patch_qnap_config.py --dry-run     # 先看要插什么
@@ -231,7 +205,7 @@ sudo python3 scripts/patch_qnap_config.py
 参数可调：`--model`（标识名）、`--board`（主板子串，必须能命中 `MB=` 串）、
 `--fans`（风扇 EC 索引，默认 `1,2`）。
 
-### 5.4 编译并加载
+### 5.3 编译并加载
 
 ```bash
 K=$(uname -r)
@@ -252,7 +226,7 @@ qnap8528 @ qnap8528_register_hwmon: Hwmon device registered
 编译时若出现 <code>cp: cannot stat '/lib/modules/&lt;K&gt;/build/.config'</code>，
 **可以忽略** —— 只是 DKMS 想拷内核 `.config` 而已，模块照常编译、签名、加载。
 
-### 5.5 验证 PWM 真的能控速
+### 5.4 验证 PWM 真的能控速
 
 ```bash
 H=$(dirname $(ls /sys/class/hwmon/*/pwm1 | head -1))
@@ -266,7 +240,7 @@ echo $ORIG > $H/pwm1                              # 务必恢复原值
 > 容器在自动模式下每 5 秒会按曲线覆写 `pwm1`，想干净地测就先
 > `docker stop fnos-fan-webui`，测完再 `start`。
 
-### 5.6 持久化
+### 5.5 持久化
 
 ```bash
 # 开机自动加载（注意：先写普通文件再 sudo cp，别用 tee -a 管道——
@@ -282,7 +256,7 @@ sudo cp /tmp/dt.conf /etc/modules-load.d/drivetemp.conf
 sudo modprobe drivetemp      # 立即生效，不用重启
 ```
 
-### 5.7 部署 Web UI
+### 5.6 部署 Web UI
 
 ```bash
 sudo mkdir -p /vol1/docker/fnos-fan-webui/data
@@ -614,6 +588,8 @@ sudo systemctl daemon-reload
 
 ```text
 .
+├── README.md
+├── LICENSE
 ├── install.sh                      # 一键安装（幂等，无需重启）
 ├── app/
 │   ├── fan_webui.py                # 温控 Web UI + JSON API（单文件，无第三方依赖）
@@ -623,8 +599,8 @@ sudo systemctl daemon-reload
 │   ├── zz-qnap8528.sh              # 内核 postinst 钩子：升级时精确重编译
 │   ├── qnap8528-load.sh            # 开机自愈：模块缺失就补编译再加载
 │   └── qnap8528-load.service       # 对应 systemd unit
-└── tools/
-    └── rexec.py                    # Windows 端远程执行助手（paramiko）
+└── docs/
+    └── screenshot.png              # 上面的界面截图
 ```
 
 ---
