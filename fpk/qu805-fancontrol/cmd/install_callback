@@ -1,0 +1,14 @@
+#!/bin/bash
+# 安装后：部署驱动 → DKMS 编译 → 配置 → 接管旧安装。
+#
+# 注意这里是**直接调用** service_postinst 而不是 call_func：call_func 会把函数放进
+# `... | install_log` 管道，管道只会返回末端 install_log 的退出码，service_postinst
+# 里的 `exit 1` 会被吃掉，安装即使失败也会显示成功。直接调用才能把失败传出。
+COMMON=$(dirname $0)"/common"; [ -r "${COMMON}" ] && . "${COMMON}"
+SVC_SETUP=$(dirname $0)"/service-setup"; [ -r "${SVC_SETUP}" ] && . "${SVC_SETUP}"
+install_log "Begin install_callback"
+call_func "save_wizard_variables" install_log
+sync_var_folder
+service_postinst || exit 1
+install_log "End install_callback"
+exit 0

@@ -1,0 +1,16 @@
+#!/bin/bash
+# qu805-fancontrol 服务控制入口。由框架调用：
+#   start / stop / status / log [行数] / restart
+COMMON=$(dirname $0)"/common"; [ -r "${COMMON}" ] && . "${COMMON}"
+SVC_SETUP=$(dirname $0)"/service-setup"; [ -r "${SVC_SETUP}" ] && . "${SVC_SETUP}"
+case $1 in
+start)   if daemon_status; then exit 0; else start_daemon; exit $?; fi ;;
+stop)    stop_daemon; exit 0 ;;
+restart) stop_daemon; start_daemon; exit $? ;;
+status)  if daemon_status; then echo "${DNAME} is running"; exit 0; else echo "${DNAME} is not running"; exit 3; fi ;;
+log)
+    LINES="${2:-100}"
+    if [ -f "${APP_LOG}" ]; then tail -n "$LINES" "${APP_LOG}"; else echo "暂无应用日志（${APP_LOG} 不存在）"; fi
+    exit 0 ;;
+esac
+exit 1

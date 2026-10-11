@@ -1,0 +1,422 @@
+#!/bin/bash
+# ============================================================================
+# qu805-fancontrol —— 生命周期脚本
+#
+# 本应用做两件事：
+#   1) 驱动：把随包提供的 qnap8528 源码用 DKMS 现场编译并加载（自带 QU805/SA145
+#      机型补丁），并在内核升级后自动重编。
+#   2) 服务：以**非 Docker** 方式常驻运行 fan_webui.py（风扇温控 Web 界面）。
+#
+# 框架约定（见 cmd/common）：
+#   · 本文件在 cmd/main 里于 common 之后 source，因此可以覆盖其中的变量与函数。
+#   · SERVICE_COMMAND 是 start_daemon 真正拉起的命令。
+#   · service_prestart 会被 start_daemon 调用；service_postinst /
+#     service_preuninst / service_postuninst 由框架在对应阶段调用。
+# ============================================================================
+
+LOG_FILE="${TRIM_PKGVAR}/service.log"
+PID_FILE="${TRIM_PKGVAR}/${TRIM_APPNAME}.pid"
+# 应用自己的日志（fan_webui.py 直接写这个文件，带按天保留）；与框架日志分开，
+# 因为 start_daemon 在 SVC_QUIET 未置位时会用 `date > ${LOG_FILE}` 截断日志文件。
+APP_LOG="${TRIM_PKGVAR}/fan.log"
+
+APP_DIR="${TRIM_APPDEST}"
+APP_DATA_DIR="${TRIM_PKGVAR}"
+WEB_PORT=8605
+
+# 非交互 shell 的 PATH 常常缺 sbin，而 dkms / modinfo 都在那儿
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
+
+# ---------------- 驱动 / DKMS 参数 ----------------
+DKMS_NAME="qnap8528"
+DKMS_VER="1.21"
+DKMS_PKG="${DKMS_NAME}/${DKMS_VER}"
+SRC_DIR="/usr/src/${DKMS_NAME}-${DKMS_VER}"
+MODCONF="/etc/modprobe.d/qnap8528.conf"
+LOADCONF="/etc/modules-load.d/qnap8528.conf"
+# 记录「上次为哪个内核编译过」，启动时比对即可判断内核是否升级。
+# 放 /etc 下（固定绝对路径），不依赖框架变量目录 —— 避免安装阶段与启动阶段
+# 对 TRIM_PKGVAR 解析不一致导致记录丢失。
+KVER_FILE="/etc/qu805-fancontrol-kver"
+# EC 硬件 ID 校验在 QU805 上过不了，必须跳过，否则 probe 直接 -524 加载失败
+MODULE_OPTS="skip_hw_check=true"
+
+PYTHON="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
+
+# 旧的手工安装会与本应用争夺 pwm1（两个写者互相覆盖，风扇会来回跳），
+# 安装时统一「接管」：备份并停用，而不是直接删掉，随时可回滚。
+LEGACY_FILES=(
+  "/etc/kernel/postinst.d/zz-qnap8528"
+  "/usr/local/sbin/qnap8528-load.sh"
+  "/etc/systemd/system/qnap8528-load.service"
+)
+LEGACY_UNIT="qnap8528-load.service"
+LEGACY_CONTAINER="fnos-fan-webui"
+
+# ---------------- 对外服务命令 ----------------
+SERVICE_COMMAND="${PYTHON} ${APP_DIR}/fan_webui.py --data-dir ${APP_DATA_DIR} --port ${WEB_PORT}"
+SVC_BACKGROUND=y
+SVC_WRITE_PID=y
+SVC_CWD="${APP_DATA_DIR}"
+# SVC_QUIET=y 让框架不再往 LOG_FILE 里写「Starting ...」并避免用 `date >` 截断日志，
+# 我们的日志统一由 elog() 写，安装期的记录才能一直保留到运行期。
+SVC_QUIET=y
+# 服务自身的 stdout/stderr 丢掉即可（应用日志自己落 fan.log，stdout 只会是噪音）
+SVC_NO_REDIRECT=y
+# 就绪门控：启动后最多等这么久确认进程没有立刻退出（冷启动要读驱动，给宽一点）
+SVC_WAIT_TIMEOUT=30
+
+# ---------- 日志 ----------
+# 同时写进框架日志（service.log）与 stderr（安装器会收集到安装输出里）
+elog() {
+    local m="$*"
+    # 数据目录可能还没建（例如 install_init 阶段就调用），先兜住再写，
+    # 否则重定向失败会在安装日志里留下一条刺眼的 bash 报错
+    [ -d "${TRIM_PKGVAR}" ] || mkdir -p "${TRIM_PKGVAR}" 2>/dev/null || true
+    printf '%s [qu805] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${m}" >>"${LOG_FILE}" 2>/dev/null || true
+    install_log "${m}"
+}
+
+# ============================================================================
+# 一、主板校验
+# ============================================================================
+# QU805 的 DMI 实测：board_vendor=iEi, board_name=SA145, product_name=QuNAS-X05
+# 本应用的配置项只对这张板子的 EC 有效，装错机器上可能写坏别人的 EC 寄存器。
+board_is_supported() {
+    local txt=""
+    local f
+    for f in board_vendor board_name product_name product_family; do
+        [ -r "/sys/class/dmi/id/${f}" ] && txt="${txt} $(cat "/sys/class/dmi/id/${f}" 2>/dev/null)"
+    done
+    case "${txt}" in
+        *SA145*|*sa145*|*QU805*|*QuNAS*|*qu805*) return 0 ;;
+    esac
+    return 1
+}
+
+require_supported_board() {
+    if board_is_supported; then
+        elog "主板校验通过：$(cat /sys/class/dmi/id/board_vendor 2>/dev/null) $(cat /sys/class/dmi/id/board_name 2>/dev/null) / $(cat /sys/class/dmi/id/product_name 2>/dev/null)"
+        return 0
+    fi
+    if [ "${QU805_FORCE_INSTALL:-0}" = "1" ]; then
+        elog "WARN: 主板未识别，但 QU805_FORCE_INSTALL=1 已强制继续（风险自负）"
+        return 0
+    fi
+    local msg="ERROR: 本应用仅适用于威联通 QU805（主板 iEi SA145）。当前主板：$(cat /sys/class/dmi/id/board_vendor 2>/dev/null) $(cat /sys/class/dmi/id/board_name 2>/dev/null)。如确认要强行安装，请设置 QU805_FORCE_INSTALL=1。"
+    elog "${msg}"
+    echo "${msg}" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+    return 1
+}
+
+# ============================================================================
+# 二、接管旧的手工安装
+# ============================================================================
+# 一旦本应用接管 pwm1，旧机制的 systemd 单元 / 内核钩子就变成干扰项
+# （它们会重复 dkms install、并在开机时抢先 modprobe），旧 Docker 容器更是
+# 直接和本应用抢着写 pwm1。这里统一停用并备份，同时生成一键回滚脚本。
+takeover_legacy() {
+    local bak="${APP_DATA_DIR}/legacy-backup-$(date +%Y%m%d-%H%M%S)"
+    local found=0 f
+
+    for f in "${LEGACY_FILES[@]}"; do
+        [ -e "${f}" ] || continue
+        [ ${found} -eq 0 ] && { mkdir -p "${bak}"; found=1; }
+        elog "接管旧安装：移走 ${f}"
+        cp -a "${f}" "${bak}/$(basename "${f}")" 2>/dev/null
+    done
+
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl disable "${LEGACY_UNIT}" >>"${LOG_FILE}" 2>&1 || true
+    fi
+    for f in "${LEGACY_FILES[@]}"; do
+        [ -e "${f}" ] && rm -f "${f}"
+    done
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >>"${LOG_FILE}" 2>&1 || true
+        systemctl reset-failed "${LEGACY_UNIT}" >>"${LOG_FILE}" 2>&1 || true
+    fi
+
+    # 旧 Docker 版温控：它同样会写 pwm1，必须停掉并取消自启
+    if command -v docker >/dev/null 2>&1 && docker inspect "${LEGACY_CONTAINER}" >/dev/null 2>&1; then
+        [ ${found} -eq 0 ] && { mkdir -p "${bak}"; found=1; }
+        elog "接管旧安装：停止并取消自启容器 ${LEGACY_CONTAINER}"
+        docker update --restart=no "${LEGACY_CONTAINER}" >>"${LOG_FILE}" 2>&1 || true
+        docker stop "${LEGACY_CONTAINER}" >>"${LOG_FILE}" 2>&1 || true
+        docker inspect "${LEGACY_CONTAINER}" > "${bak}/docker-inspect-${LEGACY_CONTAINER}.json" 2>/dev/null || true
+    fi
+
+    if [ ${found} -eq 1 ]; then
+        cat > "${bak}/RESTORE.sh" <<RESTORE
+#!/bin/bash
+# 一键回滚：把本应用接管前的旧手工安装原样放回。
+# 前提：先在本应用里点「卸载」，或至少把服务停掉，否则两个写者会打架。
+set -e
+echo "从 ${bak} 恢复旧安装 ..."
+[ -f "${bak}/zz-qnap8528" ]           && install -m 755 "${bak}/zz-qnap8528"           /etc/kernel/postinst.d/zz-qnap8528
+[ -f "${bak}/qnap8528-load.sh" ]      && install -m 755 "${bak}/qnap8528-load.sh"      /usr/local/sbin/qnap8528-load.sh
+[ -f "${bak}/qnap8528-load.service" ] && install -m 644 "${bak}/qnap8528-load.service" /etc/systemd/system/qnap8528-load.service \\
+                                      && systemctl daemon-reload && systemctl enable --now qnap8528-load.service || true
+if [ -f "${bak}/docker-inspect-${LEGACY_CONTAINER}.json" ]; then
+    docker update --restart=unless-stopped ${LEGACY_CONTAINER} && docker start ${LEGACY_CONTAINER} || true
+fi
+echo "恢复完成。"
+RESTORE
+        chmod 755 "${bak}/RESTORE.sh"
+        elog "旧安装已备份到 ${bak}，回滚脚本：${bak}/RESTORE.sh"
+    else
+        elog "未发现需要接管的旧手工安装"
+    fi
+}
+
+# ============================================================================
+# 三、构建工具链
+# ============================================================================
+# 飞牛因自带 ZFS / amdgpu 的 DKMS 模块，通常已具备 dkms+gcc+make+内核头文件，
+# 但 gcc 只是 dkms 的 Recommends，不保证默认装上。缺失时先尝试 apt 补装，
+# 仍失败则给出明确的手动命令（绝不静默失败）。
+check_toolchain() {
+    local krel missing="" c
+    krel="$(uname -r)"
+    for c in dkms gcc make; do
+        command -v "$c" >/dev/null 2>&1 || missing="${missing} ${c}"
+    done
+    [ -e "/lib/modules/${krel}/build" ] || missing="${missing} linux-headers-${krel}"
+
+    if [ -n "${missing}" ]; then
+        elog "缺少构建依赖:${missing}，尝试通过 apt 安装 ..."
+        if command -v apt-get >/dev/null 2>&1; then
+            timeout 180 apt-get update >>"${LOG_FILE}" 2>&1 || true
+            timeout 180 apt-get install -y dkms gcc make "linux-headers-${krel}" >>"${LOG_FILE}" 2>&1 || true
+        fi
+        missing=""
+        for c in dkms gcc make; do
+            command -v "$c" >/dev/null 2>&1 || missing="${missing} ${c}"
+        done
+        [ -e "/lib/modules/${krel}/build" ] || missing="${missing} linux-headers-${krel}"
+    fi
+
+    if [ -n "${missing}" ]; then
+        local msg="ERROR: 缺少编译所需的构建工具/内核头文件 (${missing})。请在飞牛终端手动执行：apt-get update && apt-get install -y dkms gcc make linux-headers-\$(uname -r)，然后重试安装。"
+        elog "${msg}"
+        echo "${msg}" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+        return 1
+    fi
+    elog "构建工具链检查通过：dkms / gcc / make / 内核头文件 均就绪"
+    return 0
+}
+
+# ============================================================================
+# 四、部署驱动源码（含 QU805/SA145 补丁）
+# ============================================================================
+deploy_driver_source() {
+    if [ ! -d "${APP_DIR}/driver-src/src" ]; then
+        elog "ERROR: 包内缺少驱动源码 ${APP_DIR}/driver-src/src"
+        return 1
+    fi
+
+    # dkms 树里若已注册同名同版本，先摘掉，保证这次用的是我们这份源码
+    if dkms status -m "${DKMS_NAME}" -v "${DKMS_VER}" >/dev/null 2>&1; then
+        elog "DKMS 中已存在 ${DKMS_PKG}，先移除旧注册"
+        dkms remove -m "${DKMS_NAME}" -v "${DKMS_VER}" --all >>"${LOG_FILE}" 2>&1 || true
+    fi
+
+    # 旧源码目录（可能是手工装的、或上一个版本）挪走而不是删掉
+    if [ -d "${SRC_DIR}" ]; then
+        local keep="${SRC_DIR}.bak-app-$(date +%Y%m%d-%H%M%S)"
+        elog "已存在 ${SRC_DIR}，备份为 ${keep}"
+        mv "${SRC_DIR}" "${keep}" 2>/dev/null || rm -rf "${SRC_DIR}"
+    fi
+
+    elog "部署驱动源码到 ${SRC_DIR}"
+    cp -r "${APP_DIR}/driver-src" "${SRC_DIR}"
+    chmod -R u+rwX,go+rX "${SRC_DIR}"
+
+    # 打 QU805/SA145 机型补丁（脚本自身幂等：已打过就直接退出）
+    if [ -f "${APP_DIR}/tools/patch_qnap_config.py" ]; then
+        elog "应用 QU805/SA145 机型补丁 ..."
+        "${PYTHON}" "${APP_DIR}/tools/patch_qnap_config.py" --src "${SRC_DIR}" >>"${LOG_FILE}" 2>&1 \
+            || elog "WARN: 补丁脚本返回非 0，请检查 ${LOG_FILE}"
+    fi
+
+    if ! grep -q '"QU805"' "${SRC_DIR}/src/qnap8528.h" 2>/dev/null; then
+        elog "ERROR: 补丁后仍未在 qnap8528.h 中找到 QU805 配置项，中止安装"
+        return 1
+    fi
+    elog "驱动源码就绪，QU805 配置项已存在"
+    return 0
+}
+
+# ============================================================================
+# 五、加载模块 / 内核升级自愈
+# ============================================================================
+load_module() {
+    if [ -d /sys/module/${DKMS_NAME} ]; then
+        return 0
+    fi
+    elog "加载 ${DKMS_NAME} 内核模块 ..."
+    if modprobe ${DKMS_NAME} ${MODULE_OPTS} >>"${LOG_FILE}" 2>&1; then
+        elog "模块加载成功"
+        return 0
+    fi
+    elog "WARN: modprobe ${DKMS_NAME} 失败（详见 ${LOG_FILE}）"
+    return 1
+}
+
+# 飞牛每次系统更新都会重启，重启后应用由框架重新拉起（调用 start_daemon）。
+# 借这个必然事件比对「上次编译内核」与「当前内核」：
+#   一致   → 跳过（秒级，无副作用）
+#   不一致 → 内核已升级，自动 --force 重编当前内核
+# 完全不依赖飞牛是否走了标准内核 postinst 钩子。
+ensure_built_for_current_kernel() {
+    local cur_krel built_krel
+    cur_krel="$(uname -r)"
+    built_krel=""
+    [ -r "${KVER_FILE}" ] && built_krel="$(tr -d '[:space:]' < "${KVER_FILE}" 2>/dev/null)"
+
+    if [ "${cur_krel}" = "${built_krel}" ] && modinfo -k "${cur_krel}" ${DKMS_NAME} >/dev/null 2>&1; then
+        return 0
+    fi
+
+    elog "检测到内核变化或模块缺失：上次编译=[${built_krel:-无}] 当前=[${cur_krel}]，重新编译 ${DKMS_PKG} ..."
+
+    if [ ! -d "${SRC_DIR}/src" ] || ! dkms status -m "${DKMS_NAME}" -v "${DKMS_VER}" >/dev/null 2>&1; then
+        elog "DKMS 源码树/注册缺失，重建 ..."
+        deploy_driver_source || return 1
+        dkms add -m "${DKMS_NAME}" -v "${DKMS_VER}" >>"${LOG_FILE}" 2>&1 || true
+    fi
+
+    check_toolchain || return 1
+
+    if dkms install -m "${DKMS_NAME}" -v "${DKMS_VER}" --force >>"${LOG_FILE}" 2>&1; then
+        echo "${cur_krel}" > "${KVER_FILE}"
+        elog "内核变化后重编译完成 (${cur_krel})"
+        return 0
+    fi
+    elog "ERROR: 重编译 ${DKMS_PKG} 失败，请查看 ${LOG_FILE}；可手动执行 dkms install -m ${DKMS_NAME} -v ${DKMS_VER} --force"
+    return 1
+}
+
+# ============================================================================
+# 六、风扇交接（停机/卸载时别把风扇留在低转速上）
+# ============================================================================
+# qnap8528 的 hwmon 只暴露 pwm1，没有 pwm1_enable，无法「交还 EC 自动控制」。
+# 能做的是兜底：万一停机时占空比很低（例如被手动调到 20%），抬到 40% 再走，
+# 避免应用卸载后风扇卡在低速。正常运行时本函数不产生任何写入。
+handover_pwm() {
+    local h pwm v pct
+    for h in /sys/class/hwmon/hwmon*; do
+        [ -r "${h}/name" ] || continue
+        [ "$(cat "${h}/name" 2>/dev/null)" = "${DKMS_NAME}" ] || continue
+        for pwm in ${h}/pwm[0-9]; do
+            [ -w "${pwm}" ] || continue
+            v="$(cat "${pwm}" 2>/dev/null)" || continue
+            case "${v}" in ''|*[!0-9]*) continue ;; esac
+            pct=$(( v * 100 / 255 ))
+            if [ "${pct}" -lt 40 ]; then
+                elog "停机交接：$(basename "${pwm}") 当前 ${pct}%，抬到 40% 以防风扇低速空转"
+                echo 102 > "${pwm}" 2>/dev/null || true
+            fi
+        done
+    done
+}
+
+# ============================================================================
+# 七、生命周期钩子
+# ============================================================================
+
+# 安装前：只做可失败的预检，不落任何改动
+validate_preinst() {
+    require_supported_board
+}
+
+# 安装后：部署驱动 → DKMS 编译 → 写配置 → 加载 → 接管旧安装
+service_postinst() {
+    mkdir -p "${APP_DATA_DIR}" 2>/dev/null || true
+
+    require_supported_board || exit 1
+    check_toolchain || exit 1
+
+    deploy_driver_source || exit 1
+
+    elog "DKMS add ${DKMS_PKG} ..."
+    dkms add -m "${DKMS_NAME}" -v "${DKMS_VER}" >>"${LOG_FILE}" 2>&1
+
+    elog "DKMS install ${DKMS_PKG}（为当前内核编译并装入）..."
+    if ! dkms install -m "${DKMS_NAME}" -v "${DKMS_VER}" --force >>"${LOG_FILE}" 2>&1; then
+        local msg="ERROR: DKMS 编译/安装 ${DKMS_PKG} 失败，详见 ${LOG_FILE}"
+        elog "${msg}"
+        echo "${msg}" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+        exit 1
+    fi
+
+    printf 'options %s %s\n' "${DKMS_NAME}" "${MODULE_OPTS}" > "${MODCONF}"
+    printf '%s\n' "${DKMS_NAME}" > "${LOADCONF}"
+    echo "$(uname -r)" > "${KVER_FILE}"
+
+    # 模块可能已被旧机制加载过（旧参数相同），先卸再按我们的参数装，保证一致
+    modprobe -r "${DKMS_NAME}" >>"${LOG_FILE}" 2>&1 || true
+    load_module || elog "WARN: 模块未加载，开机时会由 modules-load.d 重试"
+
+    # 写配置、加载都成功后再接管旧安装（顺序反了会出现「旧的停了新的没起来」的空窗）
+    takeover_legacy
+
+    elog "安装完成：驱动 ${DKMS_PKG} 已就绪，Web 界面端口 ${WEB_PORT}"
+}
+
+# 启动前（每次 start 都会走）：内核变化检测 + 确保模块在位
+service_prestart() {
+    mkdir -p "${APP_DATA_DIR}" 2>/dev/null || true
+    ensure_built_for_current_kernel || elog "WARN: 内核重编译未成功，仍尝试用现有模块启动"
+    if [ ! -d /sys/module/${DKMS_NAME} ]; then
+        modprobe ${DKMS_NAME} ${MODULE_OPTS} >>"${LOG_FILE}" 2>&1 || true
+    fi
+    if [ ! -d /sys/module/${DKMS_NAME} ]; then
+        elog "WARN: ${DKMS_NAME} 未加载，Web 界面将看不到风扇数据"
+    fi
+}
+
+# 停止后 / 卸载前：风扇兜底交接
+service_poststop() { handover_pwm; }
+service_preuninst() { handover_pwm; }
+
+# 升级：先原地备份数据，装完再走一遍驱动部署（幂等）
+service_preupgrade() {
+    local bak="${APP_DATA_DIR}/upgrade-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "${bak}" 2>/dev/null || true
+    local f
+    for f in curve-config.json fan.log history.tsv; do
+        [ -f "${APP_DATA_DIR}/${f}" ] && cp -a "${APP_DATA_DIR}/${f}" "${bak}/" 2>/dev/null
+    done
+    elog "升级前已备份数据到 ${bak}"
+}
+
+service_restore() { :; }
+
+service_postupgrade() {
+    elog "升级后重新部署驱动 ..."
+    check_toolchain || return 0
+    deploy_driver_source || return 0
+    dkms add -m "${DKMS_NAME}" -v "${DKMS_VER}" >>"${LOG_FILE}" 2>&1 || true
+    if dkms install -m "${DKMS_NAME}" -v "${DKMS_VER}" --force >>"${LOG_FILE}" 2>&1; then
+        echo "$(uname -r)" > "${KVER_FILE}"
+        modprobe -r "${DKMS_NAME}" >>"${LOG_FILE}" 2>&1 || true
+        load_module || true
+        elog "升级后驱动部署完成"
+    else
+        elog "ERROR: 升级后驱动重编译失败，详见 ${LOG_FILE}"
+    fi
+}
+
+# 卸载后：摘 DKMS、删源码与配置（数据目录由框架按「是否删除数据」决定）
+service_postuninst() {
+    elog "卸载：移除 DKMS ${DKMS_PKG} ..."
+    modprobe -r "${DKMS_NAME}" >>"${LOG_FILE}" 2>&1 || true
+    dkms remove -m "${DKMS_NAME}" -v "${DKMS_VER}" --all >>"${LOG_FILE}" 2>&1 || true
+    rm -rf "${SRC_DIR}"
+    rm -f "${MODCONF}" "${LOADCONF}" "${KVER_FILE}"
+    command -v depmod >/dev/null 2>&1 && depmod -a >>"${LOG_FILE}" 2>&1 || true
+    elog "卸载清理完成。旧手工安装的备份仍在 ${APP_DATA_DIR}/legacy-backup-*/（需保留请勿勾选「删除数据」）"
+}
+
+service_postconfig() { :; }

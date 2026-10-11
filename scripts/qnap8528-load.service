@@ -1,0 +1,18 @@
+[Unit]
+Description=Load qnap8528 EC fan driver
+Documentation=file:/var/log/qnap8528-dkms.log
+DefaultDependencies=no
+Before=shutdown.target
+After=systemd-modules-load.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 缺模块时要现场编译，给足时间（systemd 默认 90s，冷编译可能不够）
+TimeoutStartSec=600
+ExecStart=/usr/local/sbin/qnap8528-load.sh
+ExecStop=/usr/sbin/modprobe -r qnap8528
+
+[Install]
+WantedBy=sysinit.target

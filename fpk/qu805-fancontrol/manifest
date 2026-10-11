@@ -1,0 +1,13 @@
+appname               = qu805-fancontrol
+version               = 1.0.0
+display_name          = QU805 风扇温控
+desc                  = <b>QU805 风扇温控</b> 为威联通 QU805（iEi SA145 主板 / ITE8528E EC）刷飞牛 fnOS 后恢复风扇 PWM 调速。<br><br><b>功能：</b><br>- 内置 qnap8528 驱动源码，安装时用 DKMS 现场编译并加载（自带 QU805/SA145 机型补丁），无需手动打补丁<br>- 随内核升级自动重编（启动时比对内核版本），开机自动加载，无需手动 insmod<br>- 按 CPU 温度分档调速，带「升档 / 降档持续确认」过滤瞬时温度尖峰<br>- 机械硬盘高温保护：任一机械盘达阈值立即提到指定转速<br>- Web 界面：温度 / 转速历史曲线、运行日志、档位规则、手动模式，一屏看全<br>- 安全下限保护：档位低于下限时界面明确提示，日志不再「说谎」<br><br><b>适用：</b>QNAP QU805（主板 iEi SA145）。其他机型不适用。<br><br><b>说明：</b>安装需要 DKMS 构建环境（dkms + gcc + make + 当前内核头文件），飞牛因自带 ZFS / amdgpu 的 DKMS 模块通常已具备；若缺失，安装脚本会尝试 apt 补装，仍失败则给出明确的手动命令。<b>全程离线，不下载任何外部包</b>（驱动源码已随包提供）。<br><br><b>项目仓库：</b>https://github.com/wymam/qnap-qu805-fan-control
+platform              = x86
+source                = thirdparty
+maintainer            = wymam
+maintainer_url        = https://github.com/wymam/qnap-qu805-fan-control
+distributor           = wymam
+distributor_url       = https://github.com/wymam/qnap-qu805-fan-control
+desktop_uidir         = ui
+desktop_applaunchname = qu805-fancontrol.Application
+service_port          = 8605

@@ -1,0 +1,6 @@
+{
+    "port-config": {
+        "protocol-file": "qu805-fancontrol.sc"
+    },
+    "systemd-unit": {}
+}

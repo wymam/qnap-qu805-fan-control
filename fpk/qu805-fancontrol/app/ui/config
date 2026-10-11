@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "qu805-fancontrol.Application": {
+            "title": "QU805 风扇温控",
+            "desc": "温度档位调速 / 机械盘高温保护 / 历史曲线",
+            "icon": "images/icon_{0}.png",
+            "type": "url",
+            "protocol": "http",
+            "port": "8605",
+            "url": "/",
+            "allUsers": true
+        }
+    }
+}

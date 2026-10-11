@@ -1,0 +1,4 @@
+#!/bin/bash
+COMMON=$(dirname $0)"/common"; [ -r "${COMMON}" ] && . "${COMMON}"
+SVC_SETUP=$(dirname $0)"/service-setup"; [ -r "${SVC_SETUP}" ] && . "${SVC_SETUP}"
+uninstall_init
